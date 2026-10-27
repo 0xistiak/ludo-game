@@ -32,6 +32,7 @@ import {
   Coord,
 } from './boardLayout';
 import { TokenSvg } from './TokenSvg';
+import { sound } from '@/utils/audio';
 
 interface LudoBoardProps {
   gameState: GameState;
@@ -124,6 +125,10 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
     // Step-by-step hop along path
     onAnimationStateChange?.(true);
 
+    if (lastMove.from === STEP_BASE) {
+      sound.playBaseExit();
+    }
+
     const path = lastMove.path;
     const stepDuration = Math.min(140, Math.max(80, Math.floor(1000 / Math.max(1, path.length))));
     let currentIdx = 0;
@@ -131,6 +136,7 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
     const stepInterval = setInterval(() => {
       currentIdx++;
       if (currentIdx < path.length) {
+        sound.playTokenStep(currentIdx);
         setAnimatingStep({
           tokenId: lastMove.tokenId,
           step: path[currentIdx],
@@ -142,6 +148,7 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
 
         // Capture flash effect
         if (lastMove.capturedTokenIds && lastMove.capturedTokenIds.length > 0) {
+          sound.playCapture();
           setCapturedFlash({
             tokenIds: lastMove.capturedTokenIds,
             coord: toCoord,
@@ -151,6 +158,7 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
             onAnimationStateChange?.(false);
           }, 200);
         } else if (lastMove.reachedHome) {
+          sound.playHomeFinish();
           setSparkleCoord(toCoord);
           setTimeout(() => {
             setSparkleCoord(null);

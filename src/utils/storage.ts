@@ -27,7 +27,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   playerName: 'Player 1',
   playerColor: 'red',
   mode: '1v1',
-  soundEnabled: false,
+  soundEnabled: true,
   player2Name: 'Player 2',
   player3Name: 'Player 3',
   player4Name: 'Player 4',
