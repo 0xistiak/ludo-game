@@ -21,8 +21,37 @@ Developed by **[istiak.tech](https://istiak.tech)**.
 - **Typography**: Google Fonts Poppins & Nunito.
 - **Mobile-First**: Designed for 360px–430px mobile viewports (100dvh, safe-area insets, no page scrolling, `touch-action: manipulation`, 44px+ touch targets). Fully centered and responsive on desktop.
 - **100% Vector Rendering**: Entire board, 3D pawns, 3D ivory dice, crown badges, and character avatars are drawn in clean SVG and Tailwind CSS.
-- **Procedural Sound FX**: Zero remote audio assets; synthesized procedurally via the browser's Web Audio API. Sound is OFF by default and can be toggled via the settings modal.
+- **Procedural Sound FX**: Zero remote audio assets; synthesized procedurally via the browser's Web Audio API. Sound is ON by default and can be toggled via the gameplay top bar or Settings modal.
 - **Accessibility**: Full `prefers-reduced-motion` support. Explicit active turn badges and text labels so state never relies on color alone.
+
+---
+
+## 🔊 Procedural Audio & iPhone Silent-Switch
+
+PlayWebLudo features a zero-dependency procedural audio engine built on the Web Audio API (`src/utils/audio.ts`) with no external audio files and no network requests.
+
+### Audio Architecture
+- **DynamicsCompressor & Master Gain**: All sounds route through a Web Audio `DynamicsCompressorNode` (`threshold: -14dB`, `knee: 25`, `ratio: 10`) and master gain node (default volume ~0.7) to guarantee loud, punchy, distortion-free playback across mobile speakers.
+- **Sound Effects Synthesized**:
+  1. **UI Click**: Soft pop/tick on button taps.
+  2. **Dice Roll**: Bolder, richer rattle with band-pass filtered noise clicks slowing down over ~500ms, 3 wooden knocks, and a resonant low thump on landing.
+  3. **Token Move**: Short wooden tock on every cell step (pitch-scaled with hop count).
+  4. **Token Exit from Base**: Distinct buoyant pop.
+  5. **Capture**: Punchy impact sound with low-frequency saw drop and noise burst.
+  6. **Reaching Home**: ~1s ascending 4-note chime (G5, C6, E6, G6) with high specular sparkle.
+  7. **Game Win**: Multi-voice victory fanfare celebration.
+  8. **Bonus Turn / Turn Cancelled**: Distinct melodic cues for bonus rolls and 3-sixes revert.
+- **Controls & Persistence**: Default sound is **ON**. Toggle mute anytime from the top bar icon or the Settings modal. State is saved in `localStorage`.
+- **Test Sound Button**: Located in the Settings modal to instantly test UI click, dice roll, and celebration fanfare.
+
+### iPhone Silent-Switch Note
+> [!NOTE]
+> On iOS (iPhone Safari & WebViews), Web Audio is routed by default through the "ambient" audio category, meaning it is silenced whenever the physical Ring/Silent switch on the side of the iPhone is switched to Silent / Mute.
+>
+> To ensure game sound works reliably even when the physical silent switch is active, PlayWebLudo automatically:
+> 1. Configures `navigator.audioSession.type = 'playback'` where supported on modern iOS.
+> 2. Plays a short, inaudible, silent HTML5 audio data URI element upon the first user interaction (`pointerdown`, `touchend`, `click`) to switch the iOS audio session to media playback.
+> 3. Resumes suspended contexts automatically on `visibilitychange` and user taps.
 
 ---
 

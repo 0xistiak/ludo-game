@@ -69,7 +69,15 @@ test.describe('Multiplayer Two-Player Lobby & Game Flow', () => {
     const hostStartBtn = hostPage.locator('#lobby-start-button');
     await expect(hostStartBtn).toBeVisible();
     await expect(hostStartBtn).toBeDisabled();
-    await expect(hostPage.getByText(/Waiting for all players to join/i)).toBeVisible();
+    await expect(hostPage.getByText(/Waiting for opponent to join/i)).toBeVisible();
+
+    // Verify Start Game button is within viewport without scrolling
+    const hostStartBox = await hostStartBtn.boundingBox();
+    expect(hostStartBox).not.toBeNull();
+    if (hostStartBox) {
+      expect(hostStartBox.y).toBeGreaterThanOrEqual(0);
+      expect(hostStartBox.y + hostStartBox.height).toBeLessThanOrEqual(hostPage.viewportSize()?.height || 844);
+    }
 
     // Host does NOT see "I'm Ready" button
     await expect(hostPage.locator('#lobby-ready-button')).not.toBeVisible();
@@ -110,13 +118,21 @@ test.describe('Multiplayer Two-Player Lobby & Game Flow', () => {
     await expect(guestReadyBtn).toContainText(/I'm Ready/i);
     await expect(guestPage.locator('#lobby-start-button')).not.toBeVisible();
 
+    // Verify Ready button is within viewport without scrolling
+    const guestReadyBox = await guestReadyBtn.boundingBox();
+    expect(guestReadyBox).not.toBeNull();
+    if (guestReadyBox) {
+      expect(guestReadyBox.y).toBeGreaterThanOrEqual(0);
+      expect(guestReadyBox.y + guestReadyBox.height).toBeLessThanOrEqual(guestPage.viewportSize()?.height || 844);
+    }
+
     // On Host screen (via realtime or polling): Player count updates to 2/2
     await expect(hostPage.getByText(/Waiting for players \(2\/2\)/i)).toBeVisible({ timeout: 8000 });
     await expect(hostPage.getByText('BobGuest')).toBeVisible();
 
     // On Host screen: Start button is still disabled because BobGuest is not ready
     await expect(hostStartBtn).toBeDisabled();
-    await expect(hostPage.getByText(/Waiting for all players to be ready/i)).toBeVisible();
+    await expect(hostPage.getByText(/Waiting for all players to (click|be) ready/i)).toBeVisible();
 
     // 4. Guest clicks "I'm Ready" -> toggles to "Ready ✓"
     await guestReadyBtn.click();
