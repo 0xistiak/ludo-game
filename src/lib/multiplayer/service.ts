@@ -8,6 +8,8 @@ import {
   CreateRoomInput,
   JoinRoomInput,
   ToggleReadyInput,
+  StartGameInput,
+  LeaveRoomInput,
   RollDiceInput,
   MakeMoveInput,
   ReconnectInput,
@@ -28,14 +30,20 @@ function createServiceError(message: string, code?: string): ServiceError {
 
 /**
  * Strips other players' session_ids so that clients cannot inspect or steal them.
+ * Also tags each player with is_host so clients can render badges without seeing session_ids.
  */
-function sanitizePlayerList(players: RoomPlayerRow[], clientSessionId?: string): RoomPlayerRow[] {
+function sanitizePlayerList(
+  players: RoomPlayerRow[],
+  clientSessionId?: string,
+  hostId?: string
+): RoomPlayerRow[] {
   return players.map((p) => {
     const { session_id, ...safe } = p;
+    const is_host = hostId ? session_id === hostId || p.seat_index === 0 : p.seat_index === 0;
     if (clientSessionId && session_id === clientSessionId) {
-      return { ...safe, session_id };
+      return { ...safe, session_id, is_host };
     }
-    return safe;
+    return { ...safe, is_host };
   });
 }
 
@@ -161,7 +169,7 @@ export class MultiplayerService {
       existingMe.is_connected = true;
       return {
         room: room as RoomRow,
-        players: sanitizePlayerList(players as RoomPlayerRow[], input.sessionId),
+        players: sanitizePlayerList(players as RoomPlayerRow[], input.sessionId, room.host_id),
         me: existingMe as RoomPlayerRow,
       };
     }
@@ -217,11 +225,21 @@ export class MultiplayerService {
       throw new Error(`Failed to join room: ${joinError?.message || 'Database error'}`);
     }
 
+    const { data: updatedRoom } = await supabase
+      .from('rooms')
+      .update({
+        version: room.version + 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', room.id)
+      .select('*')
+      .single();
+
     const updatedPlayers = [...players, newPlayer] as RoomPlayerRow[];
 
     return {
-      room: room as RoomRow,
-      players: sanitizePlayerList(updatedPlayers, input.sessionId),
+      room: (updatedRoom || room) as RoomRow,
+      players: sanitizePlayerList(updatedPlayers, input.sessionId, room.host_id),
       me: newPlayer as RoomPlayerRow,
     };
   }
@@ -252,6 +270,17 @@ export class MultiplayerService {
       throw new Error(`Failed to update ready state: ${readyError.message}`);
     }
 
+    // Touch room version and updated_at so polling/realtime detects player readiness changes
+    const { data: updatedRoom } = await supabase
+      .from('rooms')
+      .update({
+        version: room.version + 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', room.id)
+      .select('*')
+      .single();
+
     const { data: players } = await supabase
       .from('room_players')
       .select('*')
@@ -259,48 +288,155 @@ export class MultiplayerService {
       .order('seat_index', { ascending: true });
 
     const playerList = (players || []) as RoomPlayerRow[];
-    const requiredCount = room.mode === '1v1' ? 2 : 4;
-    const allReady =
-      playerList.length === requiredCount &&
-      playerList.every((p) => p.is_ready);
-
-    let updatedRoom = room as RoomRow;
-
-    if (allReady && room.status === 'waiting') {
-      const enginePlayers = playerList.map((p) => ({
-        name: p.name,
-        color: p.color.toLowerCase() as PlayerColor,
-      }));
-
-      const initialState = createGame({
-        mode: room.mode,
-        players: enginePlayers,
-      });
-
-      const { data: startedRoom, error: startError } = await supabase
-        .from('rooms')
-        .update({
-          status: 'in_progress',
-          state: initialState,
-          version: room.version + 1,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', room.id)
-        .select('*')
-        .single();
-
-      if (!startError && startedRoom) {
-        updatedRoom = startedRoom as RoomRow;
-      }
-    }
-
     const me = playerList.find((p) => p.session_id === input.sessionId);
 
     return {
-      room: updatedRoom,
-      players: sanitizePlayerList(playerList, input.sessionId),
+      room: (updatedRoom || room) as RoomRow,
+      players: sanitizePlayerList(playerList, input.sessionId, room.host_id),
       me,
     };
+  }
+
+  /**
+   * Starts the game. Only the host can call this, and all non-host players must be ready.
+   */
+  static async startGame(input: StartGameInput): Promise<MultiplayerRoomData> {
+    const supabase = getSupabaseServerClient();
+
+    const { data: room, error: roomError } = await supabase
+      .from('rooms')
+      .select('*')
+      .eq('id', input.roomId)
+      .single();
+
+    if (roomError || !room) {
+      throw new Error('Room not found');
+    }
+
+    const { data: players } = await supabase
+      .from('room_players')
+      .select('*')
+      .eq('room_id', input.roomId)
+      .order('seat_index', { ascending: true });
+
+    const playerList = (players || []) as RoomPlayerRow[];
+    const me = playerList.find((p) => p.session_id === input.sessionId);
+
+    // If already playing or in_progress, return existing room state idempotently
+    if (room.status === 'playing' || room.status === 'in_progress') {
+      return {
+        room: room as RoomRow,
+        players: sanitizePlayerList(playerList, input.sessionId, room.host_id),
+        me,
+      };
+    }
+
+    // Host validation
+    if (room.host_id !== input.sessionId) {
+      throw createServiceError('Only the room host can start the game.', 'NOT_HOST');
+    }
+
+    // Player count validation
+    const requiredCount = room.mode === '1v1' ? 2 : 4;
+    if (playerList.length < requiredCount) {
+      throw createServiceError(
+        `Waiting for more players to join (${playerList.length}/${requiredCount}).`,
+        'NOT_ENOUGH_PLAYERS'
+      );
+    }
+
+    // All non-host players must be ready
+    const nonHostPlayers = playerList.filter(
+      (p) => p.session_id !== room.host_id && p.seat_index !== 0
+    );
+    const allReady = nonHostPlayers.every((p) => p.is_ready);
+    if (!allReady) {
+      throw createServiceError('Waiting for all players to be ready.', 'NOT_ALL_READY');
+    }
+
+    // Pure game engine initialization
+    const enginePlayers = playerList.map((p) => ({
+      name: p.name,
+      color: p.color.toLowerCase() as PlayerColor,
+    }));
+
+    const initialState = createGame({
+      mode: room.mode,
+      players: enginePlayers,
+    });
+
+    const { data: startedRoom, error: startError } = await supabase
+      .from('rooms')
+      .update({
+        status: 'playing',
+        state: initialState,
+        version: room.version + 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', room.id)
+      .select('*')
+      .single();
+
+    if (startError || !startedRoom) {
+      throw new Error(`Failed to start game: ${startError?.message || 'Database error'}`);
+    }
+
+    return {
+      room: startedRoom as RoomRow,
+      players: sanitizePlayerList(playerList, input.sessionId, room.host_id),
+      me,
+    };
+  }
+
+  /**
+   * Leave room handling for host or guest.
+   */
+  static async leaveRoom(input: LeaveRoomInput): Promise<{ success: boolean }> {
+    const supabase = getSupabaseServerClient();
+
+    const { data: room } = await supabase
+      .from('rooms')
+      .select('*')
+      .eq('id', input.roomId)
+      .maybeSingle();
+
+    if (!room) {
+      return { success: true };
+    }
+
+    const { data: players } = await supabase
+      .from('room_players')
+      .select('*')
+      .eq('room_id', input.roomId);
+
+    const playerList = (players || []) as RoomPlayerRow[];
+    const player = playerList.find((p) => p.session_id === input.sessionId);
+    const isHost = room.host_id === input.sessionId || player?.seat_index === 0;
+
+    if (isHost) {
+      if (room.status === 'waiting') {
+        // Host leaves waiting room -> cancel & delete room
+        await supabase.from('rooms').delete().eq('id', room.id);
+      } else {
+        // Game was active -> mark abandoned
+        await supabase
+          .from('rooms')
+          .update({ status: 'abandoned', updated_at: new Date().toISOString() })
+          .eq('id', room.id);
+      }
+    } else if (player) {
+      // Guest leaves -> remove player record and bump version
+      await supabase.from('room_players').delete().eq('id', player.id);
+      await supabase
+        .from('rooms')
+        .update({
+          version: room.version + 1,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', room.id);
+    }
+
+    return { success: true };
   }
 
   /**
@@ -323,7 +459,7 @@ export class MultiplayerService {
       throw new Error('Room not found');
     }
 
-    if (room.status !== 'in_progress') {
+    if (room.status !== 'in_progress' && room.status !== 'playing') {
       throw new Error('Game is not currently in progress');
     }
 
@@ -411,7 +547,7 @@ export class MultiplayerService {
       throw new Error('Room not found');
     }
 
-    if (room.status !== 'in_progress') {
+    if (room.status !== 'in_progress' && room.status !== 'playing') {
       throw new Error('Game is not currently in progress');
     }
 
@@ -448,7 +584,7 @@ export class MultiplayerService {
 
     // Server-side move validation and state transition using pure engine
     const nextState = applyMove(currentState, input.tokenId);
-    const newStatus = nextState.winner !== null ? 'finished' : 'in_progress';
+    const newStatus = nextState.winner !== null ? 'finished' : room.status;
 
     // Atomic CAS DB Update
     const { data: updatedRoom, error: updateError } = await supabase
@@ -510,7 +646,7 @@ export class MultiplayerService {
 
     return {
       room: room as RoomRow,
-      players: sanitizePlayerList(playerList, input.sessionId),
+      players: sanitizePlayerList(playerList, input.sessionId, room.host_id),
       me,
     };
   }
@@ -563,7 +699,7 @@ export class MultiplayerService {
 
     return {
       room: room as RoomRow,
-      players: sanitizePlayerList(playerList, identifier.sessionId),
+      players: sanitizePlayerList(playerList, identifier.sessionId, room.host_id),
       me,
     };
   }

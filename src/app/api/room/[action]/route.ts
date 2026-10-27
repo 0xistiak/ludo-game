@@ -30,6 +30,16 @@ export async function POST(
         return NextResponse.json({ success: true, data: result });
       }
 
+      case 'start': {
+        const result = await MultiplayerService.startGame(body);
+        return NextResponse.json({ success: true, data: result });
+      }
+
+      case 'leave': {
+        const result = await MultiplayerService.leaveRoom(body);
+        return NextResponse.json({ success: true, data: result });
+      }
+
       case 'roll': {
         const result = await MultiplayerService.rollDiceServer(body);
         return NextResponse.json({ success: true, data: result });

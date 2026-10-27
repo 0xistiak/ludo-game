@@ -73,8 +73,8 @@ export async function runOnlineFlowCheck() {
     }
     console.log('✓ Guest joined successfully. Host session_id is cleanly hidden.');
 
-    // 3. Both ready
-    console.log('Step 3: Guest marking ready via POST /api/room/ready...');
+    // 3. Test: Guest ready and un-ready flow
+    console.log('Step 3: Guest toggling ready state via POST /api/room/ready...');
     const readyReq = new NextRequest('http://localhost:3000/api/room/ready', {
       method: 'POST',
       body: JSON.stringify({
@@ -90,12 +90,84 @@ export async function runOnlineFlowCheck() {
       throw new Error(`Failed to set ready: ${JSON.stringify(readyJson)}`);
     }
 
-    const gameRoom = readyJson.data.room;
-    if (gameRoom.status !== 'in_progress') {
-      throw new Error(`Expected room status 'in_progress' when all players ready, got: ${gameRoom.status}`);
+    // Verify room NEVER starts automatically
+    if (readyJson.data.room.status !== 'waiting') {
+      throw new Error(`Room should still be 'waiting' after ready, got: ${readyJson.data.room.status}`);
     }
+    console.log('✓ Guest is ready. Room correctly remains in waiting status (NO auto-start).');
+
+    // 4. Test: Non-host cannot start game
+    console.log('Step 4: Verifying guest cannot start game...');
+    const guestStartReq = new NextRequest('http://localhost:3000/api/room/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        roomId: testRoomId,
+        sessionId: guestSession,
+      }),
+    });
+    const guestStartRes = await POST(guestStartReq, { params: Promise.resolve({ action: 'start' }) });
+    const guestStartJson = await guestStartRes.json();
+    if (guestStartJson.success) {
+      throw new Error('Guest was erroneously allowed to start game!');
+    }
+    console.log('✓ Guest start game rejected with error:', guestStartJson.error);
+
+    // 5. Test: Guest can un-ready and Host cannot start if non-host is un-ready
+    console.log('Step 5: Testing un-ready and start rejection when not all ready...');
+    const unreadyReq = new NextRequest('http://localhost:3000/api/room/ready', {
+      method: 'POST',
+      body: JSON.stringify({
+        roomId: testRoomId,
+        sessionId: guestSession,
+        isReady: false,
+      }),
+    });
+    await POST(unreadyReq, { params: Promise.resolve({ action: 'ready' }) });
+
+    const hostStartNotReadyReq = new NextRequest('http://localhost:3000/api/room/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        roomId: testRoomId,
+        sessionId: hostSession,
+      }),
+    });
+    const hostStartNotReadyRes = await POST(hostStartNotReadyReq, { params: Promise.resolve({ action: 'start' }) });
+    const hostStartNotReadyJson = await hostStartNotReadyRes.json();
+    if (hostStartNotReadyJson.success) {
+      throw new Error('Host was allowed to start game when players were not ready!');
+    }
+    console.log('✓ Host start rejected while player is un-ready:', hostStartNotReadyJson.error);
+
+    // Guest re-readies with a fresh Request instance
+    const reReadyReq = new NextRequest('http://localhost:3000/api/room/ready', {
+      method: 'POST',
+      body: JSON.stringify({
+        roomId: testRoomId,
+        sessionId: guestSession,
+        isReady: true,
+      }),
+    });
+    await POST(reReadyReq, { params: Promise.resolve({ action: 'ready' }) });
+
+    // 6. Host starts game
+    console.log('Step 6: Host starting game via POST /api/room/start...');
+    const hostStartReq = new NextRequest('http://localhost:3000/api/room/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        roomId: testRoomId,
+        sessionId: hostSession,
+      }),
+    });
+    const hostStartRes = await POST(hostStartReq, { params: Promise.resolve({ action: 'start' }) });
+    const hostStartJson = await hostStartRes.json();
+
+    if (!hostStartJson.success || hostStartJson.data.room.status !== 'playing') {
+      throw new Error(`Failed to start game: ${JSON.stringify(hostStartJson)}`);
+    }
+
+    const gameRoom = hostStartJson.data.room;
     currentVersion = gameRoom.version;
-    console.log(`✓ Both players ready! Match started. Status: ${gameRoom.status}, Version: ${currentVersion}`);
+    console.log(`✓ Host started match successfully! Status: ${gameRoom.status}, Version: ${currentVersion}`);
 
     // Check active player
     const state = gameRoom.state as GameState;

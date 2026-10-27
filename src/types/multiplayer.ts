@@ -3,7 +3,7 @@ import { PlayerColor } from '@/engine/geometry';
 
 export type { GameMode, GameState, PlayerColor };
 
-export type RoomStatus = 'waiting' | 'in_progress' | 'finished' | 'abandoned';
+export type RoomStatus = 'waiting' | 'in_progress' | 'playing' | 'finished' | 'abandoned';
 
 export interface RoomRow {
   id: string;
@@ -29,6 +29,7 @@ export interface RoomPlayerRow {
   is_connected: boolean;
   last_seen_at: string;
   created_at: string;
+  is_host?: boolean;
 }
 
 export interface MultiplayerRoomData {
@@ -55,6 +56,16 @@ export interface ToggleReadyInput {
   roomId: string;
   sessionId: string;
   isReady: boolean;
+}
+
+export interface StartGameInput {
+  roomId: string;
+  sessionId: string;
+}
+
+export interface LeaveRoomInput {
+  roomId: string;
+  sessionId: string;
 }
 
 export interface RollDiceInput {
