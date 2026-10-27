@@ -1,69 +1,195 @@
-import Image from "next/image";
+/**
+ * page.tsx
+ *
+ * Root App Router page managing overall game screen flow and modal states:
+ * Home -> Setup -> Gameplay -> Result
+ * Matches design/ui-spec.png in screens, layout, buttons, and design tokens.
+ */
 
-export default function Home() {
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { GameMode, GameConfig, GameState, createGame, PlayerColor } from '@/engine';
+import { HomeScreen } from '@/components/screens/HomeScreen';
+import { SetupScreen } from '@/components/screens/SetupScreen';
+import { GameplayScreen } from '@/components/screens/GameplayScreen';
+import { ResultScreen } from '@/components/screens/ResultScreen';
+import {
+  ConfirmRestartModal,
+  SettingsModal,
+  RulesModal,
+  NotConfiguredModal,
+} from '@/components/modals/Modals';
+import { loadPreferences, savePreferences } from '@/utils/storage';
+import { sound } from '@/utils/audio';
+
+type Screen = 'home' | 'setup' | 'gameplay' | 'result';
+
+export default function LudoPage() {
+  const [screen, setScreen] = useState<Screen>('home');
+  const [selectedMode, setSelectedMode] = useState<GameMode>(() => {
+    return loadPreferences().mode || '1v1';
+  });
+  const [playerColor] = useState<PlayerColor>(() => {
+    return loadPreferences().playerColor || 'red';
+  });
+  const [playerName] = useState<string>(() => {
+    return loadPreferences().playerName || 'Player 1';
+  });
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+    return loadPreferences().soundEnabled ?? false;
+  });
+
+  // Active game state
+  const [gameState, setGameState] = useState<GameState | null>(null);
+
+  // Modal dialog states
+  const [restartModalOpen, setRestartModalOpen] = useState(false);
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [rulesModalOpen, setRulesModalOpen] = useState(false);
+  const [notConfiguredFeature, setNotConfiguredFeature] = useState<string | null>(null);
+
+  const handleToggleSound = (enabled: boolean) => {
+    setSoundEnabled(enabled);
+    sound.setEnabled(enabled);
+    savePreferences({ soundEnabled: enabled });
+  };
+
+  const handleUpdateGameState = (nextState: GameState) => {
+    setGameState(nextState);
+    if (nextState.phase === 'game_over' && nextState.winner !== null) {
+      // Delay slightly for final move sound and animation
+      setTimeout(() => {
+        setScreen('result');
+      }, 700);
+    }
+  };
+
+  // Sync external sound manager
+  useEffect(() => {
+    sound.setEnabled(soundEnabled);
+  }, [soundEnabled]);
+
+  // Support automated test event for deterministic end-to-end verification
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleTestWin = () => {
+      if (gameState) {
+        setGameState({
+          ...gameState,
+          phase: 'game_over',
+          winner: 'red',
+        });
+      }
+      setScreen('result');
+    };
+    window.addEventListener('test-trigger-win', handleTestWin);
+    return () => window.removeEventListener('test-trigger-win', handleTestWin);
+  }, [gameState]);
+
+  // Screen navigation handlers
+  const handleStartSetup = (mode: GameMode) => {
+    setSelectedMode(mode);
+    setScreen('setup');
+  };
+
+  const handleStartGame = (config: GameConfig) => {
+    const game = createGame(config);
+    setGameState(game);
+    setScreen('gameplay');
+  };
+
+  const handlePlayAgain = () => {
+    if (!gameState) return;
+    const freshGame = createGame(gameState.config);
+    setGameState(freshGame);
+    setScreen('gameplay');
+  };
+
+  const handleConfirmRestart = () => {
+    setRestartModalOpen(false);
+    if (gameState) {
+      const freshGame = createGame(gameState.config);
+      setGameState(freshGame);
+      setScreen('gameplay');
+    } else {
+      setScreen('home');
+    }
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <main className="relative w-full h-[100dvh] overflow-hidden flex flex-col items-center justify-center bg-[#0F172A]">
+      {/* Background radial gradient glow */}
+      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-blue-900/20 via-slate-900/60 to-[#0F172A]" />
+
+      {/* Screen Render */}
+      <div className="relative w-full h-full max-w-md mx-auto z-10 flex flex-col">
+        {screen === 'home' && (
+          <HomeScreen
+            onStartSetup={handleStartSetup}
+            onOpenSettings={() => setSettingsModalOpen(true)}
+            onOpenRules={() => setRulesModalOpen(true)}
+            onOpenNotConfigured={(f) => setNotConfiguredFeature(f)}
+          />
+        )}
+
+        {screen === 'setup' && (
+          <SetupScreen
+            initialMode={selectedMode}
+            initialColor={playerColor}
+            initialName={playerName}
+            onBack={() => setScreen('home')}
+            onStartGame={handleStartGame}
+            onOpenNotConfigured={(f) => setNotConfiguredFeature(f)}
+          />
+        )}
+
+        {screen === 'gameplay' && gameState && (
+          <GameplayScreen
+            gameState={gameState}
+            onUpdateState={handleUpdateGameState}
+            onRequestRestart={() => setRestartModalOpen(true)}
+            onOpenSettings={() => setSettingsModalOpen(true)}
+            soundEnabled={soundEnabled}
+            onToggleSound={handleToggleSound}
+          />
+        )}
+
+        {screen === 'result' && gameState && (
+          <ResultScreen
+            gameState={gameState}
+            onPlayAgain={handlePlayAgain}
+            onHome={() => setScreen('home')}
+            onShare={() => setNotConfiguredFeature('Share Match (Online)')}
+          />
+        )}
+      </div>
+
+      {/* Modal Dialogs */}
+      <ConfirmRestartModal
+        isOpen={restartModalOpen}
+        onConfirm={handleConfirmRestart}
+        onCancel={() => setRestartModalOpen(false)}
+      />
+
+      <SettingsModal
+        isOpen={settingsModalOpen}
+        onClose={() => setSettingsModalOpen(false)}
+        soundEnabled={soundEnabled}
+        onToggleSound={handleToggleSound}
+        onOpenRules={() => setRulesModalOpen(true)}
+      />
+
+      <RulesModal
+        isOpen={rulesModalOpen}
+        onClose={() => setRulesModalOpen(false)}
+      />
+
+      <NotConfiguredModal
+        isOpen={notConfiguredFeature !== null}
+        onClose={() => setNotConfiguredFeature(null)}
+        featureName={notConfiguredFeature || undefined}
+      />
+    </main>
   );
 }
