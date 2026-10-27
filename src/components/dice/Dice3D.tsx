@@ -150,13 +150,13 @@ export const Dice3D: React.FC<Dice3DProps> = ({
   }, [rollId, isMyTurn, startTumble]);
 
   const handleRollClick = () => {
-    if (!canRoll || disabled || isRolling) return;
+    if (isRolling) return;
 
     const prefersReducedMotion =
       typeof window !== 'undefined' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    if (prefersReducedMotion) {
+    if (prefersReducedMotion || !canRoll) {
       onRoll();
       return;
     }
@@ -233,19 +233,29 @@ export const Dice3D: React.FC<Dice3DProps> = ({
         id="dice-roll-button"
         type="button"
         onClick={handleRollClick}
-        disabled={!canRoll || disabled || isRolling}
+        disabled={isRolling}
         className={`relative w-24 h-24 sm:w-28 sm:h-28 rounded-full flex items-center justify-center transition-all duration-200 select-none ${
           canRoll && !disabled && !isRolling
             ? 'scale-100 hover:scale-105 active:scale-95 cursor-pointer'
-            : 'opacity-70 cursor-not-allowed'
+            : isMyTurn && !isRolling
+            ? 'scale-100 hover:scale-105 active:scale-95 cursor-pointer opacity-90'
+            : 'opacity-70 cursor-pointer'
         }`}
         style={{
           background: `radial-gradient(circle, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.95) 70%)`,
           boxShadow:
             canRoll && !disabled
               ? `0 0 25px ${glowColor}, inset 0 0 15px ${glowColor}`
+              : isMyTurn && !isRolling
+              ? `0 0 15px ${glowColor}`
               : '0 4px 15px rgba(0, 0, 0, 0.4)',
-          border: `3px solid ${canRoll && !disabled ? glowColor : 'rgba(255, 255, 255, 0.1)'}`,
+          border: `3px solid ${
+            canRoll && !disabled
+              ? glowColor
+              : isMyTurn && !isRolling
+              ? glowColor
+              : 'rgba(255, 255, 255, 0.1)'
+          }`,
         }}
       >
         {/* 3D Dice SVG with pure clean 600ms tumble animation */}

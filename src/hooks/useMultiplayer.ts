@@ -436,15 +436,14 @@ export function useMultiplayer() {
 
       const json = await res.json();
       if (!json.success) {
-        if (json.code === 'VERSION_CONFLICT') {
-          await fetchRoomState();
-        }
+        await fetchRoomState();
         throw new Error(json.error);
       }
 
       setRoom(json.data.room);
       return json.data;
     } catch (err: unknown) {
+      await fetchRoomState();
       const msg = err instanceof Error ? err.message : 'Failed to roll dice';
       setError(msg);
       throw err;
@@ -470,15 +469,14 @@ export function useMultiplayer() {
 
         const json = await res.json();
         if (!json.success) {
-          if (json.code === 'VERSION_CONFLICT') {
-            await fetchRoomState();
-          }
+          await fetchRoomState();
           throw new Error(json.error);
         }
 
         setRoom(json.data.room);
         return json.data;
       } catch (err: unknown) {
+        await fetchRoomState();
         const msg = err instanceof Error ? err.message : 'Failed to make move';
         setError(msg);
         throw err;

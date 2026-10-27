@@ -92,17 +92,47 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
     setTimeout(() => setToastMessage(null), durationMs);
   };
 
+  const effectiveMyColor =
+    myColor ||
+    onlinePlayers?.find(
+      (p) =>
+        p.session_id &&
+        p.session_id === (typeof window !== 'undefined' ? localStorage.getItem('ludo_session_id') : '')
+    )?.color;
+
   const isMyTurn =
     !isOnline ||
-    (Boolean(myColor) && activePlayer.color.toLowerCase() === myColor?.toLowerCase());
+    (Boolean(effectiveMyColor) && activePlayer.color.toLowerCase() === effectiveMyColor?.toLowerCase());
 
   const isPhaseRoll = phase === 'awaiting-roll' || phase === 'need_roll';
   const isPhaseMove = phase === 'awaiting-move' || phase === 'need_move';
 
+  // Hard safety timeout: isNoMovePause must NEVER remain true longer than 1800ms
+  useEffect(() => {
+    if (isNoMovePause) {
+      const timer = setTimeout(() => {
+        setIsNoMovePause(false);
+        setNoMoveRoll(null);
+      }, 1800);
+      return () => clearTimeout(timer);
+    }
+  }, [isNoMovePause]);
+
+  // Hard safety timeout: isAnimating must NEVER remain true longer than 2200ms
+  useEffect(() => {
+    if (isAnimating) {
+      const timer = setTimeout(() => {
+        setIsAnimating(false);
+      }, 2200);
+      return () => clearTimeout(timer);
+    }
+  }, [isAnimating]);
+
   // Handle token selection to move
   const handleSelectToken = React.useCallback(
     (tokenId: string) => {
-      if (!isPhaseMove || isAnimating) return;
+      if (!isPhaseMove) return;
+      if (isAnimating) setIsAnimating(false);
 
       // Check legality or equivalence
       const isDirectlyLegal = legalMoves.includes(tokenId);
@@ -158,7 +188,7 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
     [isPhaseMove, isAnimating, legalMoves, tokens, isOnline, isMyTurn, onOnlineMove, activePlayer, gameState, onUpdateState]
   );
 
-  // Auto-move after ~350ms if exactly one legal choice exists
+  // Auto-move if exactly one legal choice exists (~750ms after roll)
   useEffect(() => {
     if (!isPhaseMove || !isMyTurn || isAnimating || isNoMovePause) {
       autoMoveExecutingRef.current = false;
@@ -166,17 +196,24 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
     }
 
     const singleMove = getAutoMove(gameState);
-    if (!singleMove || !autoMoveEnabled || autoMoveExecutingRef.current) {
+    if (!singleMove || !autoMoveEnabled) {
+      autoMoveExecutingRef.current = false;
+      return;
+    }
+
+    if (autoMoveExecutingRef.current) {
       return;
     }
 
     autoMoveExecutingRef.current = true;
     const timer = setTimeout(() => {
+      autoMoveExecutingRef.current = false;
       handleSelectToken(singleMove);
-    }, 1100);
+    }, 750);
 
     return () => {
       clearTimeout(timer);
+      autoMoveExecutingRef.current = false;
     };
   }, [isPhaseMove, isMyTurn, isAnimating, isNoMovePause, gameState, autoMoveEnabled, handleSelectToken]);
 
@@ -205,13 +242,15 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
           setIsNoMovePause(true);
           setNoMoveRoll(rollVal);
         }, 0);
-        const endTimer = setTimeout(() => {
+        const timer = setTimeout(() => {
           setIsNoMovePause(false);
           setNoMoveRoll(null);
         }, 1600);
         return () => {
           clearTimeout(startTimer);
-          clearTimeout(endTimer);
+          clearTimeout(timer);
+          setIsNoMovePause(false);
+          setNoMoveRoll(null);
         };
       }
     } else {
@@ -219,15 +258,36 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
     }
   }, [isOnline, gameState.rollSeq, gameState.phase, gameState.lastDiceRoll, gameState.revertedTurn]);
 
-  // Handle dice roll
+  // Handle dice roll or dice tap during move phase
   const handleRoll = () => {
-    if (isAnimating || isNoMovePause) return;
+    if (isAnimating) {
+      setIsAnimating(false);
+    }
+    if (isNoMovePause) {
+      return;
+    }
 
-    if (isOnline) {
-      if (!isMyTurn) {
-        showToast(`It is ${activePlayer.name}'s turn!`);
+    if (!isMyTurn) {
+      sound.playButton();
+      showToast(`It is ${activePlayer.name}'s (${activePlayer.color}) turn!`);
+      return;
+    }
+
+    // If player already rolled and is in awaiting-move phase:
+    if (isPhaseMove) {
+      const singleMove = getAutoMove(gameState);
+      if (singleMove) {
+        handleSelectToken(singleMove);
         return;
       }
+      if (legalMoves.length > 0) {
+        sound.playButton();
+        showToast('Tap a highlighted pawn on the board to move!');
+        return;
+      }
+    }
+
+    if (isOnline) {
       if (onOnlineRoll) {
         onOnlineRoll().catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : 'Roll failed';
