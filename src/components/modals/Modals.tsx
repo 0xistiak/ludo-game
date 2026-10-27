@@ -270,3 +270,168 @@ export const RulesModal: React.FC<{
     </ModalWrapper>
   );
 };
+
+export const GameMenuModal: React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  onResume: () => void;
+  onRequestRestart: () => void;
+  onOpenSettings: () => void;
+  onOpenRules: () => void;
+  onRequestLeave: () => void;
+}> = ({
+  isOpen,
+  onClose,
+  onResume,
+  onRequestRestart,
+  onOpenSettings,
+  onOpenRules,
+  onRequestLeave,
+}) => {
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={onClose} title="Game Menu">
+      <div className="flex flex-col gap-2.5 w-full">
+        {/* Resume */}
+        <button
+          id="menu-resume-button"
+          type="button"
+          onClick={onResume}
+          className="w-full py-3 px-4 rounded-2xl btn-gold text-sm font-black uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 transition"
+        >
+          Resume
+        </button>
+
+        {/* Restart */}
+        <button
+          id="menu-restart-button"
+          type="button"
+          onClick={() => {
+            onClose();
+            onRequestRestart();
+          }}
+          className="w-full py-3 px-4 rounded-2xl glass-card border border-slate-700/60 hover:bg-slate-800/80 text-sm font-bold text-slate-200 flex items-center justify-center gap-2 active:scale-95 transition"
+        >
+          Restart Match
+        </button>
+
+        {/* Settings */}
+        <button
+          id="menu-settings-button"
+          type="button"
+          onClick={() => {
+            onClose();
+            onOpenSettings();
+          }}
+          className="w-full py-3 px-4 rounded-2xl glass-card border border-slate-700/60 hover:bg-slate-800/80 text-sm font-bold text-slate-200 flex items-center justify-center gap-2 active:scale-95 transition"
+        >
+          Settings
+        </button>
+
+        {/* Rules */}
+        <button
+          id="menu-rules-button"
+          type="button"
+          onClick={() => {
+            onClose();
+            onOpenRules();
+          }}
+          className="w-full py-3 px-4 rounded-2xl glass-card border border-slate-700/60 hover:bg-slate-800/80 text-sm font-bold text-slate-200 flex items-center justify-center gap-2 active:scale-95 transition"
+        >
+          Rules
+        </button>
+
+        {/* Leave Game / Home */}
+        <button
+          id="menu-leave-button"
+          type="button"
+          onClick={() => {
+            onClose();
+            onRequestLeave();
+          }}
+          className="w-full py-3 px-4 rounded-2xl bg-rose-600/20 border border-rose-500/40 hover:bg-rose-600/30 text-rose-300 text-sm font-bold flex items-center justify-center gap-2 active:scale-95 transition mt-1"
+        >
+          Leave Game / Home
+        </button>
+      </div>
+    </ModalWrapper>
+  );
+};
+
+export const ConfirmLeaveModal: React.FC<{
+  isOpen: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+  isOnline?: boolean;
+}> = ({ isOpen, onConfirm, onCancel, isOnline }) => {
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={onCancel} title="Leave Game?">
+      <div className="flex flex-col items-center text-center">
+        <div className="w-14 h-14 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mb-3">
+          <AlertTriangle size={32} />
+        </div>
+        <p className="text-sm text-slate-300 mb-6">
+          {isOnline
+            ? 'Are you sure you want to leave this online match? Your room session will be closed.'
+            : 'Are you sure you want to return to Home? Your current local match progress will be cleared.'}
+        </p>
+        <div className="flex items-center gap-3 w-full">
+          <button
+            id="cancel-leave-button"
+            type="button"
+            onClick={onCancel}
+            className="flex-1 py-3 rounded-2xl glass-card border border-slate-700 font-bold text-sm text-slate-300 hover:text-white transition active:scale-95"
+          >
+            Stay
+          </button>
+          <button
+            id="confirm-leave-button"
+            type="button"
+            onClick={onConfirm}
+            className="flex-1 py-3 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 font-black text-sm text-white shadow-lg shadow-rose-900/30 active:scale-95 transition"
+          >
+            Leave Game
+          </button>
+        </div>
+      </div>
+    </ModalWrapper>
+  );
+};
+
+export const PlayerLeftModal: React.FC<{
+  isOpen: boolean;
+  onHome: () => void;
+  onRematch: () => void;
+}> = ({ isOpen, onHome, onRematch }) => {
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={onHome} title="Player Left">
+      <div className="flex flex-col items-center text-center">
+        <div className="w-14 h-14 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mb-3">
+          <AlertTriangle size={32} />
+        </div>
+        <h4 className="text-base font-black text-slate-100 mb-1">Match Ended</h4>
+        <p className="text-sm text-slate-300 mb-6">
+          An opponent has left or abandoned the match.
+        </p>
+        <div className="flex flex-col gap-2.5 w-full">
+          <button
+            id="player-left-rematch-button"
+            type="button"
+            onClick={onRematch}
+            className="w-full py-3.5 rounded-2xl btn-blue text-sm font-black uppercase tracking-wider active:scale-95 transition"
+          >
+            Rematch / New Match
+          </button>
+          <button
+            id="player-left-home-button"
+            type="button"
+            onClick={onHome}
+            className="w-full py-3 rounded-2xl glass-card border border-slate-700/60 font-bold text-sm text-slate-200 hover:bg-slate-800 transition active:scale-95"
+          >
+            Return to Home
+          </button>
+        </div>
+      </div>
+    </ModalWrapper>
+  );
+};
+

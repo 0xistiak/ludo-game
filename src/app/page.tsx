@@ -26,6 +26,13 @@ import {
 import { loadPreferences, savePreferences } from '@/utils/storage';
 import { sound } from '@/utils/audio';
 import { useMultiplayer } from '@/hooks/useMultiplayer';
+import {
+  RestorableSession,
+  saveLocalGame,
+  getLocalSavedGame,
+  clearLocalGame,
+  clearAllGameSessions,
+} from '@/lib/session/gameSession';
 
 type LocalScreen = 'home' | 'setup' | 'gameplay' | 'result';
 
@@ -61,6 +68,9 @@ export default function LudoPage() {
   // Local game state (for offline / pass & play mode)
   const [localGameState, setLocalGameState] = useState<GameState | null>(null);
 
+  // Safe restorable session for Home banner
+  const [restorableSession, setRestorableSession] = useState<RestorableSession | null>(null);
+
   // Modal dialog states
   const [restartModalOpen, setRestartModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
@@ -78,6 +88,9 @@ export default function LudoPage() {
     onlineScreen,
     isReconnecting,
     isConnected,
+    opponentLeft,
+    checkRestorableRoom,
+    reconnect,
     createRoom,
     joinRoom,
     toggleReady,
@@ -88,6 +101,40 @@ export default function LudoPage() {
   } = useMultiplayer();
 
   const isOnline = Boolean(room && onlineScreen);
+
+  // Safe session detection on startup without jumping straight into the board
+  useEffect(() => {
+    let isMounted = true;
+    async function checkSavedSessions() {
+      // 1. Check local game first
+      const localSaved = getLocalSavedGame();
+      if (localSaved && isMounted) {
+        setRestorableSession({
+          type: 'local',
+          gameState: localSaved.gameState,
+          savedAt: localSaved.savedAt,
+        });
+        return;
+      }
+
+      // 2. Check online room
+      const onlineData = await checkRestorableRoom();
+      if (onlineData?.room && isMounted) {
+        setRestorableSession({
+          type: 'online',
+          roomCode: onlineData.room.code,
+          room: onlineData.room,
+          players: onlineData.players,
+          me: onlineData.me,
+          savedAt: new Date(onlineData.room.updated_at || onlineData.room.created_at).getTime(),
+        });
+      }
+    }
+    checkSavedSessions();
+    return () => {
+      isMounted = false;
+    };
+  }, [checkRestorableRoom]);
 
   // Active game state: server room state for online mode, localGameState for local play
   const activeGameState: GameState | null = isOnline
@@ -111,17 +158,43 @@ export default function LudoPage() {
     if (typeof window === 'undefined') return;
     const handleTestWin = () => {
       if (localGameState) {
-        setLocalGameState({
+        const winState: GameState = {
           ...localGameState,
           phase: 'game_over',
           winner: 'red',
-        });
+        };
+        setLocalGameState(winState);
+        clearLocalGame();
       }
       setLocalScreen('result');
     };
     window.addEventListener('test-trigger-win', handleTestWin);
     return () => window.removeEventListener('test-trigger-win', handleTestWin);
   }, [localGameState]);
+
+  // Resume or Discard from Home banner
+  const handleResumeGame = async () => {
+    if (!restorableSession) return;
+    if (restorableSession.type === 'local') {
+      setLocalGameState(restorableSession.gameState);
+      setRestorableSession(null);
+      setLocalScreen('gameplay');
+    } else if (restorableSession.type === 'online') {
+      const code = restorableSession.roomCode;
+      setRestorableSession(null);
+      await reconnect(code);
+    }
+  };
+
+  const handleDiscardGame = () => {
+    if (!restorableSession) return;
+    if (restorableSession.type === 'local') {
+      clearLocalGame();
+    } else if (restorableSession.type === 'online') {
+      leaveRoom();
+    }
+    setRestorableSession(null);
+  };
 
   // Screen navigation handlers
   const handleStartSetup = (mode: GameMode) => {
@@ -132,7 +205,37 @@ export default function LudoPage() {
   const handleStartGame = (config: GameConfig) => {
     const game = createGame(config);
     setLocalGameState(game);
+    saveLocalGame(game);
+    setRestorableSession(null);
     setLocalScreen('gameplay');
+  };
+
+  const handleUpdateLocalState = (next: GameState) => {
+    setLocalGameState(next);
+    saveLocalGame(next);
+  };
+
+  const handleLeaveLocal = () => {
+    clearLocalGame();
+    setLocalGameState(null);
+    setRestorableSession(null);
+    setLocalScreen('home');
+  };
+
+  const handleLeaveOnline = () => {
+    leaveRoom();
+    setRestorableSession(null);
+    setLocalScreen('home');
+  };
+
+  const handleResultHome = () => {
+    clearAllGameSessions();
+    if (isOnline) {
+      leaveRoom();
+    }
+    setLocalGameState(null);
+    setRestorableSession(null);
+    setLocalScreen('home');
   };
 
   const handlePlayAgain = () => {
@@ -144,6 +247,7 @@ export default function LudoPage() {
     if (!localGameState) return;
     const freshGame = createGame(localGameState.config);
     setLocalGameState(freshGame);
+    saveLocalGame(freshGame);
     setLocalScreen('gameplay');
   };
 
@@ -157,6 +261,7 @@ export default function LudoPage() {
     if (localGameState) {
       const freshGame = createGame(localGameState.config);
       setLocalGameState(freshGame);
+      saveLocalGame(freshGame);
       setLocalScreen('gameplay');
     } else {
       setLocalScreen('home');
@@ -168,6 +273,7 @@ export default function LudoPage() {
     try {
       await createRoom(mode, name, color);
       setCreateRoomModalOpen(false);
+      setRestorableSession(null);
     } catch (err: unknown) {
       console.error('Failed to create room:', err);
     }
@@ -178,14 +284,10 @@ export default function LudoPage() {
     try {
       await joinRoom(code, name);
       setJoinRoomModalOpen(false);
+      setRestorableSession(null);
     } catch (err: unknown) {
       console.error('Failed to join room:', err);
     }
-  };
-
-  const handleLeaveOnline = () => {
-    leaveRoom();
-    setLocalScreen('home');
   };
 
   return (
@@ -216,6 +318,8 @@ export default function LudoPage() {
             onUpdateState={(next) => setLocalGameState(next)}
             onRequestRestart={() => setRestartModalOpen(true)}
             onOpenSettings={() => setSettingsModalOpen(true)}
+            onOpenRules={() => setRulesModalOpen(true)}
+            onRequestLeave={handleLeaveOnline}
             soundEnabled={soundEnabled}
             onToggleSound={handleToggleSound}
             autoMoveEnabled={autoMoveEnabled}
@@ -225,6 +329,12 @@ export default function LudoPage() {
             isReconnecting={isReconnecting}
             isConnected={isConnected}
             onlinePlayers={players}
+            opponentLeft={opponentLeft}
+            onHome={handleLeaveOnline}
+            onRematch={() => {
+              leaveRoom();
+              setCreateRoomModalOpen(true);
+            }}
             onOnlineRoll={async () => {
               await rollDiceServer();
             }}
@@ -238,7 +348,7 @@ export default function LudoPage() {
           <ResultScreen
             gameState={activeGameState}
             onPlayAgain={handlePlayAgain}
-            onHome={handleLeaveOnline}
+            onHome={handleResultHome}
             onShare={() => setNotConfiguredFeature('Share Match (Online)')}
           />
         )}
@@ -252,6 +362,9 @@ export default function LudoPage() {
             onOpenNotConfigured={(f) => setNotConfiguredFeature(f)}
             onCreateRoom={() => setCreateRoomModalOpen(true)}
             onJoinRoom={() => setJoinRoomModalOpen(true)}
+            restorableSession={restorableSession}
+            onResumeGame={handleResumeGame}
+            onDiscardGame={handleDiscardGame}
           />
         )}
 
@@ -270,9 +383,11 @@ export default function LudoPage() {
         {!isOnline && localScreen === 'gameplay' && activeGameState && (
           <GameplayScreen
             gameState={activeGameState}
-            onUpdateState={(next) => setLocalGameState(next)}
+            onUpdateState={handleUpdateLocalState}
             onRequestRestart={() => setRestartModalOpen(true)}
             onOpenSettings={() => setSettingsModalOpen(true)}
+            onOpenRules={() => setRulesModalOpen(true)}
+            onRequestLeave={handleLeaveLocal}
             soundEnabled={soundEnabled}
             onToggleSound={handleToggleSound}
             autoMoveEnabled={autoMoveEnabled}
@@ -284,7 +399,7 @@ export default function LudoPage() {
           <ResultScreen
             gameState={activeGameState}
             onPlayAgain={handlePlayAgain}
-            onHome={() => setLocalScreen('home')}
+            onHome={handleResultHome}
             onShare={() => setNotConfiguredFeature('Share Match (Local)')}
           />
         )}

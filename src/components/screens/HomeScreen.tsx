@@ -20,6 +20,8 @@ import { sound } from '@/utils/audio';
 
 import Image from 'next/image';
 
+import { RestorableSession } from '@/lib/session/gameSession';
+
 interface HomeScreenProps {
   onStartSetup: (mode: GameMode) => void;
   onOpenSettings: () => void;
@@ -27,6 +29,9 @@ interface HomeScreenProps {
   onOpenNotConfigured: (feature: string) => void;
   onCreateRoom?: () => void;
   onJoinRoom?: () => void;
+  restorableSession?: RestorableSession | null;
+  onResumeGame?: () => void;
+  onDiscardGame?: () => void;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
@@ -36,6 +41,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onOpenNotConfigured,
   onCreateRoom,
   onJoinRoom,
+  restorableSession,
+  onResumeGame,
+  onDiscardGame,
 }) => {
   const handleModeClick = (mode: GameMode) => {
     sound.playButton();
@@ -88,6 +96,60 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         <div className="-mt-1 px-4 py-0.5 rounded-full bg-blue-600/90 border border-blue-400/80 text-[10px] sm:text-[11px] font-black tracking-widest text-white shadow-lg uppercase shrink-0">
           PLAY TOGETHER
         </div>
+
+        {/* Resume Your Game Card / Banner */}
+        {restorableSession && (
+          <div
+            id="resume-game-banner"
+            className="w-full mt-2.5 p-3 sm:p-3.5 rounded-2xl glass-card border border-amber-500/50 bg-gradient-to-r from-amber-500/15 via-slate-900/90 to-blue-500/15 shadow-2xl flex flex-col gap-2 z-20 animate-scale-up shrink-0 text-left"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                <span className="text-xs sm:text-sm font-black text-amber-300 tracking-wide uppercase">
+                  Resume Your Game
+                </span>
+              </div>
+              <span className="text-[10px] font-bold text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded-full border border-slate-700">
+                {restorableSession.type === 'online'
+                  ? `Online Room: ${restorableSession.roomCode}`
+                  : `Local ${restorableSession.gameState.config.mode.toUpperCase()}`}
+              </span>
+            </div>
+
+            <p className="text-[11px] sm:text-xs text-slate-300 line-clamp-1">
+              {restorableSession.type === 'online'
+                ? 'Online multiplayer match in progress.'
+                : `Match with ${restorableSession.gameState.players.map((p) => p.name).join(' vs ')}.`}
+            </p>
+
+            <div className="flex items-center gap-2 pt-0.5">
+              <button
+                id="resume-game-button"
+                type="button"
+                onClick={() => {
+                  sound.playButton();
+                  onResumeGame?.();
+                }}
+                className="flex-1 py-2 px-3 rounded-xl btn-gold text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 active:scale-95 transition"
+              >
+                <span>▶</span> Resume
+              </button>
+
+              <button
+                id="discard-game-button"
+                type="button"
+                onClick={() => {
+                  sound.playButton();
+                  onDiscardGame?.();
+                }}
+                className="py-2 px-3 rounded-xl glass-card border border-rose-500/40 hover:bg-rose-500/20 text-rose-300 text-xs font-bold flex items-center justify-center gap-1 active:scale-95 transition"
+              >
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Big Golden Primary Action Button: "Play Now" */}
         <button

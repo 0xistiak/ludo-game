@@ -15,7 +15,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { RotateCcw, Volume2, VolumeX, MessageSquare, Smile, Settings as SettingsIcon } from 'lucide-react';
+import { RotateCcw, Volume2, VolumeX, MessageSquare, Smile, Settings as SettingsIcon, Menu } from 'lucide-react';
 import {
   GameState,
   applyMove,
@@ -26,6 +26,7 @@ import {
 import { LudoBoard } from '../board/LudoBoard';
 import { Dice3D } from '../dice/Dice3D';
 import { PlayerCard } from '../gameplay/PlayerCard';
+import { GameMenuModal, ConfirmLeaveModal, PlayerLeftModal } from '../modals/Modals';
 import { sound } from '@/utils/audio';
 import { RoomPlayerRow } from '@/types/multiplayer';
 
@@ -34,6 +35,8 @@ interface GameplayScreenProps {
   onUpdateState: (newState: GameState) => void;
   onRequestRestart: () => void;
   onOpenSettings: () => void;
+  onOpenRules?: () => void;
+  onRequestLeave?: () => void;
   soundEnabled: boolean;
   onToggleSound: (enabled: boolean) => void;
   isOnline?: boolean;
@@ -45,6 +48,9 @@ interface GameplayScreenProps {
   isConnected?: boolean;
   onlinePlayers?: RoomPlayerRow[];
   autoMoveEnabled?: boolean;
+  opponentLeft?: boolean;
+  onHome?: () => void;
+  onRematch?: () => void;
 }
 
 export const GameplayScreen: React.FC<GameplayScreenProps> = ({
@@ -52,6 +58,8 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
   onUpdateState,
   onRequestRestart,
   onOpenSettings,
+  onOpenRules,
+  onRequestLeave,
   soundEnabled,
   onToggleSound,
   isOnline = false,
@@ -63,10 +71,15 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
   isConnected = true,
   onlinePlayers,
   autoMoveEnabled = true,
+  opponentLeft = false,
+  onHome,
+  onRematch,
 }) => {
   const { mode, players, activePlayerIndex, phase, currentRoll, diceValue, legalMoves, tokens } = gameState;
   const activePlayer = players[activePlayerIndex];
 
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [leaveModalOpen, setLeaveModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isAnimating, setIsAnimating] = useState<boolean>(false);
   const [isNoMovePause, setIsNoMovePause] = useState<boolean>(false);
@@ -287,6 +300,19 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
           >
             <SettingsIcon size={16} />
           </button>
+
+          <button
+            id="game-menu-button"
+            type="button"
+            onClick={() => {
+              sound.playButton();
+              setMenuOpen(true);
+            }}
+            className="w-8 h-8 rounded-xl glass-card border border-slate-700/60 flex items-center justify-center text-slate-300 hover:text-white transition"
+            title="Menu"
+          >
+            <Menu size={16} />
+          </button>
         </div>
       </div>
 
@@ -449,6 +475,49 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
           <MessageSquare size={20} />
         </button>
       </div>
+
+      {/* In-Game Menu Modal */}
+      <GameMenuModal
+        isOpen={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        onResume={() => setMenuOpen(false)}
+        onRequestRestart={() => {
+          setMenuOpen(false);
+          onRequestRestart();
+        }}
+        onOpenSettings={() => {
+          setMenuOpen(false);
+          onOpenSettings();
+        }}
+        onOpenRules={() => {
+          setMenuOpen(false);
+          onOpenRules?.();
+        }}
+        onRequestLeave={() => {
+          setMenuOpen(false);
+          setLeaveModalOpen(true);
+        }}
+      />
+
+      {/* Confirm Leave Modal */}
+      <ConfirmLeaveModal
+        isOpen={leaveModalOpen}
+        onConfirm={() => {
+          setLeaveModalOpen(false);
+          onRequestLeave?.();
+        }}
+        onCancel={() => setLeaveModalOpen(false)}
+        isOnline={isOnline}
+      />
+
+      {/* Opponent Left / Abandoned Modal */}
+      {opponentLeft && (
+        <PlayerLeftModal
+          isOpen={true}
+          onHome={() => onHome?.()}
+          onRematch={() => onRematch?.()}
+        />
+      )}
     </div>
   );
 };
