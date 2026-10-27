@@ -23,6 +23,8 @@ interface HomeScreenProps {
   onOpenSettings: () => void;
   onOpenRules: () => void;
   onOpenNotConfigured: (feature: string) => void;
+  onCreateRoom?: () => void;
+  onJoinRoom?: () => void;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
@@ -30,6 +32,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onOpenSettings,
   onOpenRules,
   onOpenNotConfigured,
+  onCreateRoom,
+  onJoinRoom,
 }) => {
   const handleModeClick = (mode: GameMode) => {
     sound.playButton();
@@ -209,7 +213,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           type="button"
           onClick={() => {
             sound.playButton();
-            onOpenNotConfigured('Create Online Room');
+            if (onCreateRoom) onCreateRoom();
+            else onOpenNotConfigured('Create Online Room');
           }}
           className="flex flex-col items-center justify-center p-2.5 rounded-2xl glass-card border border-slate-700/60 hover:bg-slate-800/80 active:scale-95 transition"
         >
@@ -222,7 +227,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           type="button"
           onClick={() => {
             sound.playButton();
-            onOpenNotConfigured('Join Online Room');
+            if (onJoinRoom) onJoinRoom();
+            else onOpenNotConfigured('Join Online Room');
           }}
           className="flex flex-col items-center justify-center p-2.5 rounded-2xl glass-card border border-slate-700/60 hover:bg-slate-800/80 active:scale-95 transition"
         >

@@ -17,12 +17,17 @@ test.describe('Mobile Ludo User Flow (390x844)', () => {
     await expect(page.locator('#mode-1v1-button')).toBeVisible();
     await expect(page.locator('#mode-2v2-button')).toBeVisible();
 
-    // Verify honest "Not configured yet" state for online room buttons
+    // Verify Create Room modal opens and closes
     await page.locator('#create-room-button').click();
-    await expect(page.getByText('Not Configured Yet')).toBeVisible();
-    await expect(page.getByText(/Phase 2/)).toBeVisible();
-    await page.getByRole('button', { name: 'Got It' }).click();
-    await expect(page.getByText('Not Configured Yet')).not.toBeVisible();
+    await expect(page.getByText('Create Online Room')).toBeVisible();
+    await page.locator('#close-create-room-modal').click();
+    await expect(page.getByText('Create Online Room')).not.toBeVisible();
+
+    // Verify Join Room modal opens and closes
+    await page.locator('#join-room-button').click();
+    await expect(page.getByText('Join Online Room')).toBeVisible();
+    await page.locator('#close-join-room-modal').click();
+    await expect(page.getByText('Join Online Room')).not.toBeVisible();
 
     // 2. Navigate to Game Setup
     await page.locator('#play-now-button').click();

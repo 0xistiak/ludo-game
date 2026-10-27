@@ -30,6 +30,12 @@ interface GameplayScreenProps {
   onOpenSettings: () => void;
   soundEnabled: boolean;
   onToggleSound: (enabled: boolean) => void;
+  isOnline?: boolean;
+  myColor?: string;
+  onOnlineRoll?: () => Promise<void>;
+  onOnlineMove?: (tokenId: string) => Promise<void>;
+  roomCode?: string;
+  isReconnecting?: boolean;
 }
 
 export const GameplayScreen: React.FC<GameplayScreenProps> = ({
@@ -39,6 +45,12 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
   onOpenSettings,
   soundEnabled,
   onToggleSound,
+  isOnline = false,
+  myColor,
+  onOnlineRoll,
+  onOnlineMove,
+  roomCode,
+  isReconnecting = false,
 }) => {
   const { mode, players, activePlayerIndex, phase, currentRoll, legalMoves, tokens } = gameState;
   const activePlayer = players[activePlayerIndex];
@@ -50,8 +62,26 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
     setTimeout(() => setToastMessage(null), 2500);
   };
 
+  const isMyTurn =
+    !isOnline ||
+    (Boolean(myColor) && activePlayer.color.toLowerCase() === myColor?.toLowerCase());
+
   // Handle dice roll
   const handleRoll = () => {
+    if (isOnline) {
+      if (!isMyTurn) {
+        showToast(`It is ${activePlayer.name}'s turn!`);
+        return;
+      }
+      if (onOnlineRoll) {
+        onOnlineRoll().catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : 'Roll failed';
+          showToast(msg);
+        });
+      }
+      return;
+    }
+
     try {
       const result = rollDice(gameState);
       onUpdateState(result.state);
@@ -65,7 +95,7 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
           showToast('Two 6s in a row! Careful: 3rd six forfeits turn!');
         }
       }
-    } catch (e) {
+    } catch (e: unknown) {
       console.error(e);
     }
   };
@@ -74,6 +104,20 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
   const handleSelectToken = (tokenId: string) => {
     if (phase !== 'need_move') return;
     if (!legalMoves.includes(tokenId)) return;
+
+    if (isOnline) {
+      if (!isMyTurn) {
+        showToast(`It is ${activePlayer.name}'s turn!`);
+        return;
+      }
+      if (onOnlineMove) {
+        onOnlineMove(tokenId).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : 'Move failed';
+          showToast(msg);
+        });
+      }
+      return;
+    }
 
     try {
       const nextState = applyMove(gameState, tokenId);
@@ -90,7 +134,7 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
       }
 
       onUpdateState(nextState);
-    } catch (e) {
+    } catch (e: unknown) {
       console.error(e);
     }
   };
@@ -113,13 +157,21 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
             onRequestRestart();
           }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl glass-card border border-slate-700/60 hover:bg-slate-800 text-xs font-bold text-slate-300 transition"
-          title="Restart Game"
+          title={isOnline ? 'Leave Match' : 'Restart Game'}
         >
-          <RotateCcw size={15} /> Restart
+          <RotateCcw size={15} /> {isOnline ? 'Leave' : 'Restart'}
         </button>
 
-        <div className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-xs font-black tracking-wider text-slate-200">
-          {mode === '1v1' ? '1v1 DUEL' : '2v2 TEAM BATTLE'}
+        <div className="flex items-center gap-1.5">
+          <div className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-xs font-black tracking-wider text-slate-200">
+            {isOnline ? `ROOM ${roomCode || ''}` : mode === '1v1' ? '1v1 DUEL' : '2v2 TEAM BATTLE'}
+          </div>
+          {isReconnecting && (
+            <span className="text-[10px] text-amber-400 font-bold bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 rounded-full flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+              Reconnecting...
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -243,7 +295,7 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
         {/* 3D Dice */}
         <Dice3D
           currentRoll={currentRoll}
-          canRoll={phase === 'need_roll'}
+          canRoll={phase === 'need_roll' && isMyTurn}
           activeColor={activePlayer.color}
           onRoll={handleRoll}
         />

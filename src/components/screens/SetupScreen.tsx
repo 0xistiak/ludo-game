@@ -25,6 +25,7 @@ interface SetupScreenProps {
   onBack: () => void;
   onStartGame: (config: GameConfig) => void;
   onOpenNotConfigured: (feature: string) => void;
+  onOpenOnlineModal?: () => void;
 }
 
 export const SetupScreen: React.FC<SetupScreenProps> = ({
@@ -34,6 +35,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
   onBack,
   onStartGame,
   onOpenNotConfigured,
+  onOpenOnlineModal,
 }) => {
   const [mode, setMode] = useState<GameMode>(initialMode);
   const [playerColor, setPlayerColor] = useState<PlayerColor>(initialColor);
@@ -172,14 +174,15 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
               type="button"
               onClick={() => {
                 sound.playButton();
-                onOpenNotConfigured('Online Multiplayer');
+                if (onOpenOnlineModal) onOpenOnlineModal();
+                else onOpenNotConfigured('Online Multiplayer');
               }}
               className="p-3 rounded-2xl glass-card border border-slate-700/50 flex items-center justify-center gap-2 opacity-70 hover:opacity-100 transition"
             >
               <Globe size={18} className="text-blue-400" />
               <div className="text-left">
                 <div className="text-xs font-bold text-slate-200">Online</div>
-                <div className="text-[10px] text-slate-400">Phase 2</div>
+                <div className="text-[10px] text-blue-300 font-semibold">Multiplayer</div>
               </div>
             </button>
 
