@@ -17,11 +17,35 @@ const nunito = Nunito({
 });
 
 export const metadata: Metadata = {
-  title: "Ludo Play Together | Mobile First Browser Game",
+  metadataBase: new URL('https://playwebludo.vercel.app'),
+  title: "PlayWebLudo — Play Together | Mobile First Browser Game",
   description: "Play classic Ludo 1v1 and 2v2 online or offline pass-and-play. Developed by istiak.tech",
   manifest: "/manifest.json",
   icons: {
-    icon: "/favicon.ico",
+    icon: "/images/playweb-ludo-logo.png",
+    shortcut: "/images/playweb-ludo-logo.png",
+    apple: "/images/playweb-ludo-logo.png",
+  },
+  openGraph: {
+    title: "PlayWebLudo — Play Together",
+    description: "Play classic Ludo 1v1 and 2v2 online or offline pass-and-play. Developed by istiak.tech",
+    url: "https://playwebludo.vercel.app",
+    siteName: "PlayWebLudo",
+    images: [
+      {
+        url: "/images/playweb-ludo-logo.png",
+        width: 1536,
+        height: 1024,
+        alt: "PlayWebLudo Logo",
+      },
+    ],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "PlayWebLudo — Play Together",
+    description: "Play classic Ludo 1v1 and 2v2 online or offline pass-and-play. Developed by istiak.tech",
+    images: ["/images/playweb-ludo-logo.png"],
   },
 };
 

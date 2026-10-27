@@ -1,0 +1,17 @@
+{
+  "name": "PlayWebLudo",
+  "short_name": "PlayWebLudo",
+  "description": "Play classic Ludo 1v1 and 2v2 online or offline pass-and-play. Developed by istiak.tech",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0F172A",
+  "theme_color": "#0F172A",
+  "icons": [
+    {
+      "src": "/images/playweb-ludo-logo.png",
+      "sizes": "1536x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

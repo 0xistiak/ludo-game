@@ -5,9 +5,19 @@ test.describe('Mobile Ludo User Flow (390x844)', () => {
     // 1. Visit Home Screen
     await page.goto('/');
 
-    // Verify Title & Hero
-    await expect(page.locator('h1')).toHaveText('LUDO');
+    // Verify Title & Hero Logo
+    await expect(page).toHaveTitle(/PlayWebLudo/);
+    const logo = page.locator('#playweb-ludo-logo');
+    await expect(logo).toBeVisible();
     await expect(page.getByText('PLAY TOGETHER')).toBeVisible();
+
+    // Verify logo is not overflowing the viewport
+    const logoBox = await logo.boundingBox();
+    expect(logoBox).not.toBeNull();
+    if (logoBox) {
+      expect(logoBox.width).toBeLessThanOrEqual(390);
+      expect(logoBox.x + logoBox.width).toBeLessThanOrEqual(391);
+    }
 
     // Verify Mandatory Footer
     const footer = page.locator('footer');
@@ -82,7 +92,32 @@ test.describe('Mobile Ludo User Flow (390x844)', () => {
 
     // 8. Click Home button on Result Screen
     await page.locator('#home-button').click();
-    await expect(page.locator('h1')).toHaveText('LUDO');
+    await expect(page.locator('#playweb-ludo-logo')).toBeVisible();
     await expect(page.locator('#play-now-button')).toBeVisible();
+  });
+
+  test('Home screen fits in viewport without scrolling at 360x640, 390x844, and desktop', async ({ page }) => {
+    for (const vp of [{ width: 360, height: 640 }, { width: 390, height: 844 }, { width: 1280, height: 800 }]) {
+      await page.setViewportSize(vp);
+      await page.goto('/');
+
+      const logo = page.locator('#playweb-ludo-logo');
+      await expect(logo).toBeVisible();
+
+      // Check logo bounding box
+      const box = await logo.boundingBox();
+      expect(box).not.toBeNull();
+      if (box) {
+        expect(box.width).toBeLessThanOrEqual(vp.width);
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual(vp.width + 1);
+      }
+
+      // Check no vertical scrolling
+      const isScrollable = await page.evaluate(() => {
+        return document.documentElement.scrollHeight > window.innerHeight + 1;
+      });
+      expect(isScrollable).toBe(false);
+    }
   });
 });

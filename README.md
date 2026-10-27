@@ -1,6 +1,6 @@
-# 🎲 Ludo Play Together — Mobile-First Browser Game
+# 🎲 PlayWebLudo — Mobile-First Browser Game
 
-An original, mobile-first browser Ludo game built with Next.js (App Router), TypeScript (strict mode), Tailwind CSS, Motion, Zod, Vitest, and Playwright.
+An original, mobile-first browser Ludo game, **PlayWebLudo**, built with Next.js (App Router), TypeScript (strict mode), Tailwind CSS, Motion, Zod, Vitest, and Playwright.
 
 Designed to match the high-fidelity UI specification in `design/ui-spec.png` with pure SVG/CSS vector graphics and zero external image dependencies.
 
