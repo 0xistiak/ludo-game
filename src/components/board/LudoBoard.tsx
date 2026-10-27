@@ -179,6 +179,40 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
     };
   }, [lastMove, turnCount, tokens, onAnimationStateChange]);
 
+  // Handle 3 consecutive 6s turn cancellation and token slide-back
+  const [revertingActive, setRevertingActive] = useState<boolean>(false);
+  const lastHandledRevertKeyRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!gameState.revertedTurn) return;
+    const { turnCount: revTurn, revertedTokens } = gameState.revertedTurn;
+    if (revTurn === lastHandledRevertKeyRef.current || !revertedTokens || revertedTokens.length === 0) return;
+    lastHandledRevertKeyRef.current = revTurn;
+
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (prefersReducedMotion) return;
+
+    let timer: NodeJS.Timeout | null = null;
+    const startTimer = setTimeout(() => {
+      onAnimationStateChange?.(true);
+      setRevertingActive(true);
+
+      timer = setTimeout(() => {
+        setRevertingActive(false);
+        onAnimationStateChange?.(false);
+      }, 600);
+    }, 0);
+
+    return () => {
+      clearTimeout(startTimer);
+      if (timer) clearTimeout(timer);
+      onAnimationStateChange?.(false);
+    };
+  }, [gameState.revertedTurn, onAnimationStateChange]);
+
   // Group tokens by their rendered SVG coordinate to spread stacked tokens
   const tokenCoords = useMemo(() => {
     const map = new Map<string, { coord: Coord; isLegal: boolean; color: PlayerColor }>();
@@ -631,7 +665,9 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
                 key={id}
                 transform={`translate(${item.coord.x}, ${item.coord.y}) ${isHopping ? 'scale(1.25)' : 'scale(1)'}`}
                 style={{
-                  transition: isHopping
+                  transition: revertingActive
+                    ? 'transform 0.6s ease-out'
+                    : isHopping
                     ? 'transform 0.1s ease-out'
                     : 'transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1)',
                   filter: isHopping ? 'url(#hop-shadow)' : undefined,

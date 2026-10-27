@@ -7,7 +7,7 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { PlayerColor } from '@/engine';
 import { sound } from '@/utils/audio';
 
@@ -18,8 +18,8 @@ interface Dice3DProps {
   onRoll: () => void;
   disabled?: boolean;
   bonusReason?: 'six' | 'capture' | 'home' | null;
-  rollAttempts?: number;
-  isAllInBase?: boolean;
+  rollId?: string | number | null;
+  isMyTurn?: boolean;
 }
 
 export const Dice3D: React.FC<Dice3DProps> = ({
@@ -29,21 +29,82 @@ export const Dice3D: React.FC<Dice3DProps> = ({
   onRoll,
   disabled = false,
   bonusReason,
-  rollAttempts = 0,
-  isAllInBase = false,
+  rollId,
+  isMyTurn = true,
 }) => {
   const [isRolling, setIsRolling] = useState(false);
   const [tumblingFace, setTumblingFace] = useState<number>(6);
+  const isFirstMountRef = useRef(true);
+  const lastHandledRollIdRef = useRef<string | number | null>(null);
+
+  // Trigger roll animation once for online / opponent rolls
+  useEffect(() => {
+    if (isFirstMountRef.current) {
+      isFirstMountRef.current = false;
+      lastHandledRollIdRef.current = rollId ?? null;
+      return;
+    }
+
+    if (!rollId || rollId === lastHandledRollIdRef.current) {
+      return;
+    }
+
+    // For local player's turn, the roll animation is handled exclusively by handleRollClick.
+    // Sync the ref so subsequent prop/state changes never re-trigger the roll.
+    if (isMyTurn) {
+      lastHandledRollIdRef.current = rollId;
+      return;
+    }
+
+    lastHandledRollIdRef.current = rollId;
+
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReducedMotion) return;
+
+    let interval: NodeJS.Timeout | null = null;
+    let timer: NodeJS.Timeout | null = null;
+
+    const startTimer = setTimeout(() => {
+      setIsRolling(true);
+      sound.playDiceRoll();
+
+      interval = setInterval(() => {
+        setTumblingFace(Math.floor(Math.random() * 6) + 1);
+      }, 55);
+
+      timer = setTimeout(() => {
+        if (interval) clearInterval(interval);
+        setIsRolling(false);
+      }, 600);
+    }, 0);
+
+    return () => {
+      clearTimeout(startTimer);
+      if (interval) clearInterval(interval);
+      if (timer) clearTimeout(timer);
+    };
+  }, [rollId, isMyTurn]);
 
   const displayRoll = isRolling ? tumblingFace : (currentRoll ?? 6);
 
   const handleRollClick = () => {
     if (!canRoll || disabled || isRolling) return;
 
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (prefersReducedMotion) {
+      onRoll();
+      return;
+    }
+
     setIsRolling(true);
     sound.playDiceRoll();
 
-    // Tumble face animation over 480ms (strictly < 600ms)
+    // Tumble face animation over exactly 600ms that decelerates smoothly
     const interval = setInterval(() => {
       setTumblingFace(Math.floor(Math.random() * 6) + 1);
     }, 55);
@@ -52,7 +113,7 @@ export const Dice3D: React.FC<Dice3DProps> = ({
       clearInterval(interval);
       setIsRolling(false);
       onRoll();
-    }, 480);
+    }, 600);
   };
 
   const ringGlows: Record<PlayerColor, string> = {
@@ -135,16 +196,13 @@ export const Dice3D: React.FC<Dice3DProps> = ({
           border: `3px solid ${canRoll && !disabled ? glowColor : 'rgba(255, 255, 255, 0.1)'}`,
         }}
       >
-        {/* 3D Dice SVG */}
+        {/* 3D Dice SVG with pure clean 600ms tumble animation */}
         <div
-          className={`w-14 h-14 sm:w-16 sm:h-16 transition-transform ${
-            isRolling ? 'animate-spin' : ''
-          }`}
+          id="dice-cube"
+          className={`w-14 h-14 sm:w-16 sm:h-16 ${isRolling ? 'dice-tumbling' : ''}`}
           style={{
-            transform: isRolling
-              ? 'rotate(720deg) scale(0.9)'
-              : 'rotate(0deg) scale(1)',
-            transition: 'transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)',
+            transform: 'none',
+            transition: 'none',
           }}
         >
           <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-xl">
@@ -190,16 +248,10 @@ export const Dice3D: React.FC<Dice3DProps> = ({
         </div>
       </button>
 
-      {/* Bonus Roll and Attempts Badges */}
+      {/* Bonus Roll Badge */}
       {bonusReason && (
         <div className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-black text-[10px] sm:text-xs shadow-lg animate-bounce z-20">
           Roll again! ({bonusReason === 'six' ? 'Rolled a 6 🎲' : bonusReason === 'capture' ? 'Captured pawn ⚔️' : 'Reached Home 🏆'})
-        </div>
-      )}
-
-      {isAllInBase && !bonusReason && (
-        <div className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap px-2 py-0.5 rounded-full bg-blue-600/90 border border-blue-400 text-white font-extrabold text-[10px] shadow z-20">
-          3 tries to get a 6 {rollAttempts > 0 ? `(Try ${rollAttempts + 1}/3)` : ''}
         </div>
       )}
 
@@ -209,7 +261,7 @@ export const Dice3D: React.FC<Dice3DProps> = ({
           <span className="text-xs sm:text-sm font-bold text-yellow-400 animate-pulse">
             Rolling...
           </span>
-        ) : canRoll && !disabled ? (
+        ) : canRoll && !disabled && isMyTurn ? (
           <span className="text-xs sm:text-sm font-bold text-emerald-400 animate-bounce">
             Tap to Roll!
           </span>

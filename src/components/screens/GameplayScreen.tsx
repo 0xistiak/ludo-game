@@ -21,7 +21,6 @@ import {
   applyMove,
   rollDice,
   getAutoMove,
-  isPlayerAllInBase,
 } from '@/engine';
 import { LudoBoard } from '../board/LudoBoard';
 import { Dice3D } from '../dice/Dice3D';
@@ -181,6 +180,16 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
     };
   }, [isPhaseMove, isMyTurn, isAnimating, isNoMovePause, gameState, autoMoveEnabled, handleSelectToken]);
 
+  // Show toast when 3 consecutive sixes cancels and reverts turn (online and local)
+  const lastRevertedToastTurnRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (gameState.revertedTurn && gameState.revertedTurn.turnCount !== lastRevertedToastTurnRef.current) {
+      lastRevertedToastTurnRef.current = gameState.revertedTurn.turnCount;
+      showToast('Three 6s! Turn cancelled', 2000);
+      sound.playError();
+    }
+  }, [gameState.revertedTurn]);
+
   // Handle dice roll
   const handleRoll = () => {
     if (isAnimating || isNoMovePause) return;
@@ -201,6 +210,13 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
 
     try {
       const result = rollDice(gameState);
+
+      if (result.state.revertedTurn) {
+        showToast('Three 6s! Turn cancelled', 2000);
+        sound.playError();
+        onUpdateState(result.state);
+        return;
+      }
 
       if (result.legalMoves.length === 0) {
         // Show "No move" for ~700ms then pass
@@ -233,7 +249,6 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
   const pBlue = players.find((p) => p.color === 'blue');
 
   const activeRoll = currentRoll ?? diceValue;
-  const isAllInBase = isPlayerAllInBase(gameState, activePlayer);
   const bonusReason =
     gameState.bonusRoll?.reason ||
     (gameState.lastMove?.awardedExtraTurn ? gameState.lastMove.bonusReason : null);
@@ -450,7 +465,7 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
           <Smile size={20} />
         </button>
 
-        {/* 3D Dice with bonus badge and attempts counter */}
+        {/* 3D Dice with bonus badge */}
         <Dice3D
           currentRoll={activeRoll}
           canRoll={isPhaseRoll && isMyTurn && !isAnimating && !isNoMovePause}
@@ -458,8 +473,8 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
           activeColor={activePlayer.color}
           onRoll={handleRoll}
           bonusReason={bonusReason}
-          rollAttempts={gameState.rollAttempts}
-          isAllInBase={isAllInBase}
+          rollId={`${gameState.turnCount}_${activeRoll ?? 'none'}_${gameState.consecutiveSixes}_${isOnline ? (roomCode || 'online') : 'local'}`}
+          isMyTurn={isMyTurn}
         />
 
         {/* Rules quick preview button */}
