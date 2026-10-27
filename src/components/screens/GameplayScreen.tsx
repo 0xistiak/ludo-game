@@ -82,6 +82,7 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isAnimating, setIsAnimating] = useState<boolean>(false);
   const [isNoMovePause, setIsNoMovePause] = useState<boolean>(false);
+  const [noMoveRoll, setNoMoveRoll] = useState<number | null>(null);
 
   // Auto-move execution guard to avoid double moves
   const autoMoveExecutingRef = useRef<boolean>(false);
@@ -139,15 +140,14 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
       try {
         const nextState = applyMove(gameState, tokenId);
 
-        // Audio feedback
+        // Feedback
         if (nextState.lastMove?.reachedHome) {
-          sound.playHomeFinish();
           showToast(`🎉 ${activePlayer.name}'s pawn reached Home! Bonus roll!`);
         } else if ((nextState.lastMove?.capturedTokenIds.length || 0) > 0) {
-          sound.playCapture();
           showToast(`⚔️ Captured opponent pawn! Bonus roll!`);
-        } else {
-          sound.playTokenStep();
+        }
+        if (nextState.lastMove?.awardedExtraTurn) {
+          sound.playBonus();
         }
 
         onUpdateState(nextState);
@@ -219,13 +219,15 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
       }
 
       if (result.legalMoves.length === 0) {
-        // Show "No move" for ~700ms then pass
-        showToast('No move', 700);
+        // Show "No move" for ~1400ms so the rolled face is clearly visible then pass
+        showToast('No move', 1400);
         setIsNoMovePause(true);
+        setNoMoveRoll(result.roll);
         setTimeout(() => {
           setIsNoMovePause(false);
+          setNoMoveRoll(null);
           onUpdateState(result.state);
-        }, 700);
+        }, 1400);
       } else {
         onUpdateState(result.state);
 
@@ -248,13 +250,13 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
   const pYellow = players.find((p) => p.color === 'yellow');
   const pBlue = players.find((p) => p.color === 'blue');
 
-  const activeRoll = currentRoll ?? diceValue;
+  const activeRoll = isNoMovePause ? noMoveRoll : (currentRoll ?? diceValue);
   const bonusReason =
     gameState.bonusRoll?.reason ||
     (gameState.lastMove?.awardedExtraTurn ? gameState.lastMove.bonusReason : null);
 
   return (
-    <div className="relative w-full h-full max-w-lg mx-auto flex flex-col justify-between p-2 sm:p-4 overflow-hidden select-none">
+    <div className="h-screen h-[100dvh] max-h-[100dvh] w-full max-w-lg mx-auto flex flex-col justify-between p-2 sm:p-4 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] pt-[calc(0.5rem+env(safe-area-inset-top,0px))] pl-[calc(0.5rem+env(safe-area-inset-left,0px))] pr-[calc(0.5rem+env(safe-area-inset-right,0px))] overflow-hidden select-none">
       {/* Top Header Control Bar */}
       <div className="flex items-center justify-between px-1 py-1 z-20">
         <button

@@ -1,13 +1,17 @@
 /**
  * Dice3D.tsx
  *
- * 3D-styled ivory dice with realistic recessed pips, tumbling animation,
- * glowing pod, and sound effect trigger matching design/ui-spec.png.
+ * 3D-styled ivory dice with:
+ * - IDLE STATE: Plain white dice displaying the PlayWebLudo logo (no pips, no default 6)
+ * - ROLLING STATE: Smooth ~600ms decelerating random-face tumble ending on the real roll
+ * - RESULT STATE: Real number pips shown until move is finished, then returns to IDLE logo
+ * - Glowing pod with active color ring and sound effect trigger
  */
 
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import { PlayerColor } from '@/engine';
 import { sound } from '@/utils/audio';
 
@@ -33,11 +37,51 @@ export const Dice3D: React.FC<Dice3DProps> = ({
   isMyTurn = true,
 }) => {
   const [isRolling, setIsRolling] = useState(false);
-  const [tumblingFace, setTumblingFace] = useState<number>(6);
+  const [tumblingFace, setTumblingFace] = useState<number>(1);
   const isFirstMountRef = useRef(true);
   const lastHandledRollIdRef = useRef<string | number | null>(null);
+  const currentRollRef = useRef<number | null>(currentRoll);
 
-  // Trigger roll animation once for online / opponent rolls
+  useEffect(() => {
+    currentRollRef.current = currentRoll;
+  }, [currentRoll]);
+
+  // Run the smooth ~600ms decelerating random tumble sequence
+  const startTumble = (onComplete?: () => void) => {
+    setIsRolling(true);
+    sound.playDiceRoll();
+
+    const delays = [40, 45, 50, 60, 75, 95, 115, 120];
+    let step = 0;
+    let timer: NodeJS.Timeout | null = null;
+
+    const tick = () => {
+      setTumblingFace((prev) => {
+        let nextFace = Math.floor(Math.random() * 6) + 1;
+        while (nextFace === prev) {
+          nextFace = Math.floor(Math.random() * 6) + 1;
+        }
+        return nextFace;
+      });
+
+      step++;
+      if (step < delays.length) {
+        timer = setTimeout(tick, delays[step]);
+      } else {
+        // Tumble sequence complete (~600ms total)
+        setIsRolling(false);
+        onComplete?.();
+      }
+    };
+
+    timer = setTimeout(tick, delays[0]);
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  };
+
+  // Trigger roll animation for opponent rolls when roll arrives from server
   useEffect(() => {
     if (isFirstMountRef.current) {
       isFirstMountRef.current = false;
@@ -49,8 +93,7 @@ export const Dice3D: React.FC<Dice3DProps> = ({
       return;
     }
 
-    // For local player's turn, the roll animation is handled exclusively by handleRollClick.
-    // Sync the ref so subsequent prop/state changes never re-trigger the roll.
+    // If it's my turn, handleRollClick triggered the roll animation already
     if (isMyTurn) {
       lastHandledRollIdRef.current = rollId;
       return;
@@ -63,31 +106,17 @@ export const Dice3D: React.FC<Dice3DProps> = ({
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (prefersReducedMotion) return;
 
-    let interval: NodeJS.Timeout | null = null;
-    let timer: NodeJS.Timeout | null = null;
-
+    // Opponent's roll arrived: tumble asynchronously then display result
+    let cleanupFn: (() => void) | undefined;
     const startTimer = setTimeout(() => {
-      setIsRolling(true);
-      sound.playDiceRoll();
-
-      interval = setInterval(() => {
-        setTumblingFace(Math.floor(Math.random() * 6) + 1);
-      }, 55);
-
-      timer = setTimeout(() => {
-        if (interval) clearInterval(interval);
-        setIsRolling(false);
-      }, 600);
+      cleanupFn = startTumble();
     }, 0);
 
     return () => {
       clearTimeout(startTimer);
-      if (interval) clearInterval(interval);
-      if (timer) clearTimeout(timer);
+      cleanupFn?.();
     };
   }, [rollId, isMyTurn]);
-
-  const displayRoll = isRolling ? tumblingFace : (currentRoll ?? 6);
 
   const handleRollClick = () => {
     if (!canRoll || disabled || isRolling) return;
@@ -101,19 +130,9 @@ export const Dice3D: React.FC<Dice3DProps> = ({
       return;
     }
 
-    setIsRolling(true);
-    sound.playDiceRoll();
-
-    // Tumble face animation over exactly 600ms that decelerates smoothly
-    const interval = setInterval(() => {
-      setTumblingFace(Math.floor(Math.random() * 6) + 1);
-    }, 55);
-
-    setTimeout(() => {
-      clearInterval(interval);
-      setIsRolling(false);
-      onRoll();
-    }, 600);
+    // Call onRoll immediately so server request starts in parallel with animation
+    onRoll();
+    startTumble();
   };
 
   const ringGlows: Record<PlayerColor, string> = {
@@ -161,7 +180,7 @@ export const Dice3D: React.FC<Dice3DProps> = ({
 
     const coords = pips[num] || pips[1];
     return coords.map((c, i) => (
-      <g key={i}>
+      <g key={i} className="dice-pip">
         {/* Recessed pip shadow */}
         <circle cx={c.cx} cy={c.cy + 0.8} r="6.5" fill="#475569" opacity="0.4" />
         {/* Pip dark center */}
@@ -199,7 +218,7 @@ export const Dice3D: React.FC<Dice3DProps> = ({
         {/* 3D Dice SVG with pure clean 600ms tumble animation */}
         <div
           id="dice-cube"
-          className={`w-14 h-14 sm:w-16 sm:h-16 ${isRolling ? 'dice-tumbling' : ''}`}
+          className={`w-14 h-14 sm:w-16 sm:h-16 relative flex items-center justify-center ${isRolling ? 'dice-tumbling' : ''}`}
           style={{
             transform: 'none',
             transition: 'none',
@@ -242,9 +261,23 @@ export const Dice3D: React.FC<Dice3DProps> = ({
               strokeWidth="1.5"
             />
 
-            {/* Pips */}
-            {renderPips(displayRoll)}
+            {/* Pips: only shown when rolling or when currentRoll !== null */}
+            {(isRolling || currentRoll !== null) && renderPips(isRolling ? tumblingFace : currentRoll!)}
           </svg>
+
+          {/* Idle State: PlayWebLudo Logo on plain white dice, no pips, no number */}
+          {!isRolling && currentRoll === null && (
+            <div className="absolute inset-0 flex items-center justify-center p-3 pointer-events-none">
+              <Image
+                id="dice-idle-logo"
+                src="/images/playweb-ludo-logo.png"
+                alt="PlayWebLudo"
+                width={36}
+                height={36}
+                className="w-8 h-8 sm:w-9 sm:h-9 object-contain select-none pointer-events-none drop-shadow-sm"
+              />
+            </div>
+          )}
         </div>
       </button>
 
