@@ -120,6 +120,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
               Your Name
             </label>
             <input
+              id="room-player-name-input"
               type="text"
               value={playerName}
               maxLength={16}
@@ -164,6 +165,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
 
           <div className="pt-2">
             <button
+              id="submit-create-room-button"
               type="submit"
               disabled={isSubmitting}
               className="w-full py-3.5 rounded-2xl btn-green font-extrabold text-sm uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 active:scale-95 transition"

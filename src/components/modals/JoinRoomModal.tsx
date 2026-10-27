@@ -88,6 +88,7 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
               6-Character Room Code
             </label>
             <input
+              id="join-room-code-input"
               type="text"
               value={roomCode}
               maxLength={6}
@@ -105,6 +106,7 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
               Your Name
             </label>
             <input
+              id="join-player-name-input"
               type="text"
               value={playerName}
               maxLength={16}
@@ -117,6 +119,7 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
 
           <div className="pt-2">
             <button
+              id="submit-join-room-button"
               type="submit"
               disabled={isSubmitting}
               className="w-full py-3.5 rounded-2xl btn-gold font-extrabold text-sm uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 active:scale-95 transition"

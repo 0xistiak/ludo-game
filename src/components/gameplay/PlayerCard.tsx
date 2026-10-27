@@ -19,6 +19,8 @@ interface PlayerCardProps {
   mode: GameMode;
   align?: 'left' | 'right';
   className?: string;
+  isYou?: boolean;
+  isHost?: boolean;
 }
 
 export const PlayerCard: React.FC<PlayerCardProps> = ({
@@ -27,6 +29,8 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
   tokens,
   mode,
   className = '',
+  isYou = false,
+  isHost = false,
 }) => {
   const colorBorders: Record<PlayerColor, string> = {
     red: '#EF4444',
@@ -78,6 +82,20 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
           <span className="font-bold text-xs sm:text-sm text-slate-100 truncate">
             {player.name}
           </span>
+
+          {/* "You" Badge */}
+          {isYou && (
+            <span className="px-1.5 py-0.5 text-[9px] font-black uppercase rounded bg-blue-500/40 text-blue-200 border border-blue-400/30">
+              YOU
+            </span>
+          )}
+
+          {/* "Host" Badge */}
+          {isHost && (
+            <span className="px-1.5 py-0.5 text-[9px] font-black uppercase rounded bg-amber-500/30 text-amber-300 border border-amber-400/30">
+              HOST
+            </span>
+          )}
 
           {/* Explicit Active Turn Label */}
           {isActive && (

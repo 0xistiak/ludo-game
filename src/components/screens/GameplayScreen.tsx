@@ -22,6 +22,7 @@ import { LudoBoard } from '../board/LudoBoard';
 import { Dice3D } from '../dice/Dice3D';
 import { PlayerCard } from '../gameplay/PlayerCard';
 import { sound } from '@/utils/audio';
+import { RoomPlayerRow } from '@/types/multiplayer';
 
 interface GameplayScreenProps {
   gameState: GameState;
@@ -36,6 +37,8 @@ interface GameplayScreenProps {
   onOnlineMove?: (tokenId: string) => Promise<void>;
   roomCode?: string;
   isReconnecting?: boolean;
+  isConnected?: boolean;
+  onlinePlayers?: RoomPlayerRow[];
 }
 
 export const GameplayScreen: React.FC<GameplayScreenProps> = ({
@@ -51,6 +54,8 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
   onOnlineMove,
   roomCode,
   isReconnecting = false,
+  isConnected = true,
+  onlinePlayers,
 }) => {
   const { mode, players, activePlayerIndex, phase, currentRoll, legalMoves, tokens } = gameState;
   const activePlayer = players[activePlayerIndex];
@@ -166,11 +171,23 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
           <div className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-xs font-black tracking-wider text-slate-200">
             {isOnline ? `ROOM ${roomCode || ''}` : mode === '1v1' ? '1v1 DUEL' : '2v2 TEAM BATTLE'}
           </div>
-          {isReconnecting && (
-            <span className="text-[10px] text-amber-400 font-bold bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 rounded-full flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-              Reconnecting...
-            </span>
+          {isOnline && (
+            isReconnecting ? (
+              <span className="text-[10px] text-amber-400 font-bold bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                Reconnecting...
+              </span>
+            ) : isConnected ? (
+              <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                Connected
+              </span>
+            ) : (
+              <span className="text-[10px] text-rose-400 font-bold bg-rose-500/20 border border-rose-500/40 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                Offline
+              </span>
+            )
           )}
         </div>
 
@@ -207,6 +224,8 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
               isActive={activePlayerIndex === 0}
               tokens={tokens}
               mode={mode}
+              isYou={isOnline && Boolean(myColor && players[0].color.toLowerCase() === myColor.toLowerCase())}
+              isHost={isOnline && Boolean(onlinePlayers?.find((op) => op.color.toLowerCase() === players[0].color.toLowerCase())?.is_host)}
             />
             <PlayerCard
               player={players[1]}
@@ -214,6 +233,8 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
               tokens={tokens}
               mode={mode}
               align="right"
+              isYou={isOnline && Boolean(myColor && players[1].color.toLowerCase() === myColor.toLowerCase())}
+              isHost={isOnline && Boolean(onlinePlayers?.find((op) => op.color.toLowerCase() === players[1].color.toLowerCase())?.is_host)}
             />
           </>
         ) : (
@@ -224,6 +245,8 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
                 isActive={activePlayer.color === 'red'}
                 tokens={tokens}
                 mode={mode}
+                isYou={isOnline && Boolean(myColor && pRed.color.toLowerCase() === myColor.toLowerCase())}
+                isHost={isOnline && Boolean(onlinePlayers?.find((op) => op.color.toLowerCase() === pRed.color.toLowerCase())?.is_host)}
               />
             )}
             {pGreen && (
@@ -233,6 +256,8 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
                 tokens={tokens}
                 mode={mode}
                 align="right"
+                isYou={isOnline && Boolean(myColor && pGreen.color.toLowerCase() === myColor.toLowerCase())}
+                isHost={isOnline && Boolean(onlinePlayers?.find((op) => op.color.toLowerCase() === pGreen.color.toLowerCase())?.is_host)}
               />
             )}
           </>
@@ -256,6 +281,8 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
               isActive={activePlayer.color === 'blue'}
               tokens={tokens}
               mode={mode}
+              isYou={isOnline && Boolean(myColor && pBlue.color.toLowerCase() === myColor.toLowerCase())}
+              isHost={isOnline && Boolean(onlinePlayers?.find((op) => op.color.toLowerCase() === pBlue.color.toLowerCase())?.is_host)}
             />
           )}
           {pYellow && (
@@ -265,6 +292,8 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
               tokens={tokens}
               mode={mode}
               align="right"
+              isYou={isOnline && Boolean(myColor && pYellow.color.toLowerCase() === myColor.toLowerCase())}
+              isHost={isOnline && Boolean(onlinePlayers?.find((op) => op.color.toLowerCase() === pYellow.color.toLowerCase())?.is_host)}
             />
           )}
         </div>
@@ -276,6 +305,33 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
           {toastMessage}
         </div>
       )}
+
+      {/* Turn indicator text: "Your turn – tap the dice" vs "Waiting for <name>" */}
+      <div className="w-full flex justify-center px-4 my-1 z-20">
+        <div
+          className={`px-4 py-1.5 rounded-full text-xs sm:text-sm font-black tracking-wide border flex items-center gap-2 shadow-lg transition-all ${
+            isMyTurn
+              ? 'bg-blue-600/30 border-blue-400/60 text-blue-200 animate-pulse'
+              : 'bg-slate-800/90 border-slate-700 text-slate-300'
+          }`}
+        >
+          {isMyTurn ? (
+            <>
+              <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping" />
+              <span>
+                {phase === 'need_roll'
+                  ? 'Your turn – tap the dice'
+                  : 'Your turn – select a pawn to move'}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="w-2 h-2 rounded-full bg-slate-500" />
+              <span>Waiting for {activePlayer.name}...</span>
+            </>
+          )}
+        </div>
+      </div>
 
       {/* Bottom Action Area: 3D Dice & Quick Chat Buttons */}
       <div className="flex items-center justify-between px-3 pt-1 pb-2 z-10">

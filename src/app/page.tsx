@@ -27,10 +27,10 @@ import { loadPreferences, savePreferences } from '@/utils/storage';
 import { sound } from '@/utils/audio';
 import { useMultiplayer } from '@/hooks/useMultiplayer';
 
-type Screen = 'home' | 'setup' | 'lobby' | 'gameplay' | 'result';
+type LocalScreen = 'home' | 'setup' | 'gameplay' | 'result';
 
 export default function LudoPage() {
-  const [screen, setScreen] = useState<Screen>('home');
+  const [localScreen, setLocalScreen] = useState<LocalScreen>('home');
   const [selectedMode, setSelectedMode] = useState<GameMode>(() => {
     return loadPreferences().mode || '1v1';
   });
@@ -55,22 +55,25 @@ export default function LudoPage() {
   const [createRoomModalOpen, setCreateRoomModalOpen] = useState(false);
   const [joinRoomModalOpen, setJoinRoomModalOpen] = useState(false);
 
-  // Multiplayer Hook
+  // Unified Multiplayer Hook (all online state, polling, routing, reconnect)
   const {
     room,
     players,
     me,
+    isHost,
+    onlineScreen,
     isReconnecting,
+    isConnected,
     createRoom,
     joinRoom,
     toggleReady,
+    startGame,
+    leaveRoom,
     rollDiceServer,
     makeMoveServer,
-    reconnect,
-    leaveRoom,
   } = useMultiplayer();
 
-  const isOnline = Boolean(room);
+  const isOnline = Boolean(room && onlineScreen);
 
   // Active game state: server room state for online mode, localGameState for local play
   const activeGameState: GameState | null = isOnline
@@ -89,28 +92,6 @@ export default function LudoPage() {
     sound.setEnabled(soundEnabled);
   }, [soundEnabled]);
 
-  // Try automatic reconnect on initial page load if active room is cached
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const cachedCode = localStorage.getItem('ludo_active_room_code');
-    if (cachedCode) {
-      reconnect(cachedCode).catch(() => {
-        localStorage.removeItem('ludo_active_room_code');
-      });
-    }
-  }, [reconnect]);
-
-  // Watch room status transitions
-  useEffect(() => {
-    if (!room) return;
-
-    if (room.status === 'in_progress' && screen === 'lobby') {
-      queueMicrotask(() => setScreen('gameplay'));
-    } else if (room.status === 'finished' && screen === 'gameplay') {
-      queueMicrotask(() => setScreen('result'));
-    }
-  }, [room, screen]);
-
   // Support automated test event for deterministic end-to-end verification
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -122,7 +103,7 @@ export default function LudoPage() {
           winner: 'red',
         });
       }
-      setScreen('result');
+      setLocalScreen('result');
     };
     window.addEventListener('test-trigger-win', handleTestWin);
     return () => window.removeEventListener('test-trigger-win', handleTestWin);
@@ -131,59 +112,66 @@ export default function LudoPage() {
   // Screen navigation handlers
   const handleStartSetup = (mode: GameMode) => {
     setSelectedMode(mode);
-    setScreen('setup');
+    setLocalScreen('setup');
   };
 
   const handleStartGame = (config: GameConfig) => {
     const game = createGame(config);
     setLocalGameState(game);
-    setScreen('gameplay');
+    setLocalScreen('gameplay');
   };
 
   const handlePlayAgain = () => {
     if (isOnline) {
-      setScreen('lobby');
+      leaveRoom();
+      setLocalScreen('home');
       return;
     }
     if (!localGameState) return;
     const freshGame = createGame(localGameState.config);
     setLocalGameState(freshGame);
-    setScreen('gameplay');
+    setLocalScreen('gameplay');
   };
 
   const handleConfirmRestart = () => {
     setRestartModalOpen(false);
     if (isOnline) {
       leaveRoom();
-      setScreen('home');
+      setLocalScreen('home');
       return;
     }
     if (localGameState) {
       const freshGame = createGame(localGameState.config);
       setLocalGameState(freshGame);
-      setScreen('gameplay');
+      setLocalScreen('gameplay');
     } else {
-      setScreen('home');
+      setLocalScreen('home');
     }
   };
 
   // Create room flow
   const handleCreateRoom = async (mode: GameMode, name: string, color: PlayerColor) => {
-    await createRoom(mode, name, color);
-    setCreateRoomModalOpen(false);
-    setScreen('lobby');
+    try {
+      await createRoom(mode, name, color);
+      setCreateRoomModalOpen(false);
+    } catch (err: unknown) {
+      console.error('Failed to create room:', err);
+    }
   };
 
   // Join room flow
   const handleJoinRoom = async (code: string, name: string) => {
-    await joinRoom(code, name);
-    setJoinRoomModalOpen(false);
-    setScreen('lobby');
+    try {
+      await joinRoom(code, name);
+      setJoinRoomModalOpen(false);
+    } catch (err: unknown) {
+      console.error('Failed to join room:', err);
+    }
   };
 
-  const handleLeaveLobby = () => {
+  const handleLeaveOnline = () => {
     leaveRoom();
-    setScreen('home');
+    setLocalScreen('home');
   };
 
   return (
@@ -193,7 +181,55 @@ export default function LudoPage() {
 
       {/* Screen Render */}
       <div className="relative w-full h-full max-w-md mx-auto z-10 flex flex-col">
-        {screen === 'home' && (
+        {/* ONLINE SCREENS (driven directly and synchronously by useMultiplayer room state) */}
+        {isOnline && onlineScreen === 'lobby' && room && (
+          <OnlineLobbyScreen
+            room={room}
+            players={players}
+            me={me}
+            isHost={isHost}
+            onToggleReady={toggleReady}
+            onStartGame={startGame}
+            onLeave={handleLeaveOnline}
+            isReconnecting={isReconnecting}
+            isConnected={isConnected}
+          />
+        )}
+
+        {isOnline && onlineScreen === 'gameplay' && activeGameState && (
+          <GameplayScreen
+            gameState={activeGameState}
+            onUpdateState={(next) => setLocalGameState(next)}
+            onRequestRestart={() => setRestartModalOpen(true)}
+            onOpenSettings={() => setSettingsModalOpen(true)}
+            soundEnabled={soundEnabled}
+            onToggleSound={handleToggleSound}
+            isOnline={true}
+            myColor={me?.color}
+            roomCode={room?.code}
+            isReconnecting={isReconnecting}
+            isConnected={isConnected}
+            onlinePlayers={players}
+            onOnlineRoll={async () => {
+              await rollDiceServer();
+            }}
+            onOnlineMove={async (tokenId) => {
+              await makeMoveServer(tokenId);
+            }}
+          />
+        )}
+
+        {isOnline && onlineScreen === 'result' && activeGameState && (
+          <ResultScreen
+            gameState={activeGameState}
+            onPlayAgain={handlePlayAgain}
+            onHome={handleLeaveOnline}
+            onShare={() => setNotConfiguredFeature('Share Match (Online)')}
+          />
+        )}
+
+        {/* OFFLINE / PASS & PLAY SCREENS */}
+        {!isOnline && localScreen === 'home' && (
           <HomeScreen
             onStartSetup={handleStartSetup}
             onOpenSettings={() => setSettingsModalOpen(true)}
@@ -204,30 +240,19 @@ export default function LudoPage() {
           />
         )}
 
-        {screen === 'setup' && (
+        {!isOnline && localScreen === 'setup' && (
           <SetupScreen
             initialMode={selectedMode}
             initialColor={playerColor}
             initialName={playerName}
-            onBack={() => setScreen('home')}
+            onBack={() => setLocalScreen('home')}
             onStartGame={handleStartGame}
             onOpenNotConfigured={(f) => setNotConfiguredFeature(f)}
             onOpenOnlineModal={() => setCreateRoomModalOpen(true)}
           />
         )}
 
-        {screen === 'lobby' && room && (
-          <OnlineLobbyScreen
-            room={room}
-            players={players}
-            me={me}
-            onToggleReady={toggleReady}
-            onLeave={handleLeaveLobby}
-            isReconnecting={isReconnecting}
-          />
-        )}
-
-        {screen === 'gameplay' && activeGameState && (
+        {!isOnline && localScreen === 'gameplay' && activeGameState && (
           <GameplayScreen
             gameState={activeGameState}
             onUpdateState={(next) => setLocalGameState(next)}
@@ -235,28 +260,16 @@ export default function LudoPage() {
             onOpenSettings={() => setSettingsModalOpen(true)}
             soundEnabled={soundEnabled}
             onToggleSound={handleToggleSound}
-            isOnline={isOnline}
-            myColor={me?.color}
-            roomCode={room?.code}
-            isReconnecting={isReconnecting}
-            onOnlineRoll={async () => {
-              await rollDiceServer();
-            }}
-            onOnlineMove={async (tokenId) => {
-              await makeMoveServer(tokenId);
-            }}
+            isOnline={false}
           />
         )}
 
-        {screen === 'result' && activeGameState && (
+        {!isOnline && localScreen === 'result' && activeGameState && (
           <ResultScreen
             gameState={activeGameState}
             onPlayAgain={handlePlayAgain}
-            onHome={() => {
-              if (isOnline) leaveRoom();
-              setScreen('home');
-            }}
-            onShare={() => setNotConfiguredFeature('Share Match (Online)')}
+            onHome={() => setLocalScreen('home')}
+            onShare={() => setNotConfiguredFeature('Share Match (Local)')}
           />
         )}
       </div>

@@ -20,6 +20,8 @@ function getOrCreateSessionId(): string {
   return id;
 }
 
+export type OnlineScreen = 'lobby' | 'gameplay' | 'result' | null;
+
 export function useMultiplayer() {
   const [sessionId] = useState<string>(() => getOrCreateSessionId());
   const [room, setRoom] = useState<RoomRow | null>(null);
@@ -28,8 +30,8 @@ export function useMultiplayer() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
+  const [isConnected, setIsConnected] = useState<boolean>(true);
 
-  // Heartbeat interval ref
   const heartbeatTimerRef = useRef<NodeJS.Timeout | null>(null);
   const roomRef = useRef<RoomRow | null>(null);
 
@@ -37,17 +39,21 @@ export function useMultiplayer() {
     roomRef.current = room;
   }, [room]);
 
-  // Sync Room Data helper
+  // Sync room data helper
   const updateRoomData = useCallback(
     (data: MultiplayerRoomData) => {
       setRoom(data.room);
       setPlayers(data.players);
+
       if (data.me) {
         setMe(data.me);
       } else if (sessionId) {
-        const foundMe = data.players.find((p) => p.session_id === sessionId);
+        const foundMe = data.players.find(
+          (p) => p.session_id === sessionId || (p.seat_index === 0 && data.room.host_id === sessionId)
+        );
         if (foundMe) setMe(foundMe);
       }
+
       if (typeof window !== 'undefined' && data.room?.code) {
         localStorage.setItem('ludo_active_room_code', data.room.code);
       }
@@ -55,66 +61,112 @@ export function useMultiplayer() {
     [sessionId]
   );
 
-  // Realtime subscription setup
+  // Poll room data from server
+  const fetchRoomState = useCallback(async () => {
+    const currentRoomId = roomRef.current?.id;
+    if (!currentRoomId) return;
+
+    try {
+      const res = await fetch(`/api/room/get?id=${currentRoomId}&sessionId=${sessionId}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        if (json.data.room?.status === 'abandoned') {
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('ludo_active_room_code');
+          }
+          setRoom(null);
+          setPlayers([]);
+          setMe(null);
+          setError('Room was abandoned or closed.');
+          return;
+        }
+
+        updateRoomData(json.data);
+        setIsConnected(true);
+        setIsReconnecting(false);
+      }
+    } catch {
+      // Background poll failure
+    }
+  }, [sessionId, updateRoomData]);
+
+  // Realtime subscription + Fallback Polling (every 2.5s and visibility/focus/online)
   useEffect(() => {
     if (!room?.id) return;
 
-    let supabase: ReturnType<typeof getSupabaseBrowserClient>;
+    let supabase: ReturnType<typeof getSupabaseBrowserClient> | null = null;
     try {
       supabase = getSupabaseBrowserClient();
     } catch {
-      return;
+      // Supabase browser client not available
     }
 
-    const channel = supabase
-      .channel(`room_${room.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'rooms',
-          filter: `id=eq.${room.id}`,
-        },
-        (payload) => {
-          if (payload.new && (payload.new as RoomRow).id === room.id) {
-            setRoom(payload.new as RoomRow);
+    // 1. Setup Supabase Realtime channel if available
+    let channel: ReturnType<ReturnType<typeof getSupabaseBrowserClient>['channel']> | null = null;
+    if (supabase) {
+      channel = supabase
+        .channel(`room_${room.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'rooms',
+            filter: `id=eq.${room.id}`,
+          },
+          () => {
+            fetchRoomState();
           }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'room_players',
-          filter: `room_id=eq.${room.id}`,
-        },
-        async () => {
-          try {
-            const res = await fetch(`/api/room/get?id=${room.id}`);
-            const json = await res.json();
-            if (json.success && json.data) {
-              setPlayers(json.data.players);
-              if (sessionId) {
-                const foundMe = json.data.players.find((p: RoomPlayerRow) => p.session_id === sessionId);
-                if (foundMe) setMe(foundMe);
-              }
-            }
-          } catch {
-            // Ignore background fetch error
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'room_players',
+            filter: `room_id=eq.${room.id}`,
+          },
+          () => {
+            fetchRoomState();
           }
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          setIsReconnecting(false);
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          setIsReconnecting(true);
-        }
-      });
+        )
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            setIsConnected(true);
+            setIsReconnecting(false);
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            setIsReconnecting(true);
+          }
+        });
+    }
 
-    // Start heartbeat
+    // 2. Guaranteed Polling Fallback (every 2.5s)
+    const pollInterval = setInterval(() => {
+      fetchRoomState();
+    }, 2500);
+
+    // 3. Tab visibility, focus, and online events
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchRoomState();
+      }
+    };
+    const handleFocus = () => fetchRoomState();
+    const handleOnline = () => {
+      setIsConnected(true);
+      setIsReconnecting(false);
+      fetchRoomState();
+    };
+    const handleOffline = () => {
+      setIsConnected(false);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // 4. Heartbeat interval
     heartbeatTimerRef.current = setInterval(async () => {
       if (roomRef.current?.id && sessionId) {
         try {
@@ -130,12 +182,76 @@ export function useMultiplayer() {
     }, 15000);
 
     return () => {
-      supabase.removeChannel(channel);
+      if (supabase && channel) {
+        supabase.removeChannel(channel);
+      }
+      clearInterval(pollInterval);
       if (heartbeatTimerRef.current) {
         clearInterval(heartbeatTimerRef.current);
       }
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
     };
-  }, [room?.id, sessionId]);
+  }, [room?.id, sessionId, fetchRoomState]);
+
+  // Reconnect function
+  const reconnect = useCallback(
+    async (codeToReconnect?: string) => {
+      const code =
+        codeToReconnect ||
+        (typeof window !== 'undefined' ? localStorage.getItem('ludo_active_room_code') : null);
+
+      if (!code) return false;
+
+      setIsLoading(true);
+      setIsReconnecting(true);
+      try {
+        const sid = sessionId || getOrCreateSessionId();
+        const res = await fetch('/api/room/reconnect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            roomCode: code,
+            sessionId: sid,
+          }),
+        });
+
+        const json = await res.json();
+        if (json.success && json.data) {
+          updateRoomData(json.data);
+          setIsReconnecting(false);
+          setIsConnected(true);
+          return true;
+        }
+        // Room not found or unable to reconnect -> clean up
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('ludo_active_room_code');
+        }
+        return false;
+      } catch {
+        return false;
+      } finally {
+        setIsLoading(false);
+        setIsReconnecting(false);
+      }
+    },
+    [sessionId, updateRoomData]
+  );
+
+  // Auto-restore on page refresh
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const cachedCode = localStorage.getItem('ludo_active_room_code');
+    if (cachedCode && !room) {
+      queueMicrotask(() => {
+        reconnect(cachedCode).catch(() => {
+          localStorage.removeItem('ludo_active_room_code');
+        });
+      });
+    }
+  }, [reconnect, room]);
 
   // Create Room
   const createRoom = useCallback(
@@ -204,7 +320,7 @@ export function useMultiplayer() {
     [sessionId, updateRoomData]
   );
 
-  // Toggle Ready
+  // Toggle Ready (Guest only)
   const toggleReady = useCallback(
     async (isReady: boolean) => {
       if (!room?.id) return;
@@ -220,7 +336,7 @@ export function useMultiplayer() {
           }),
         });
         const json = await res.json();
-        if (!json.success) throw new Error(json.error);
+        if (!json.success) throw new Error(json.error || 'Failed to update ready state');
         updateRoomData(json.data);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Failed to toggle ready';
@@ -229,6 +345,62 @@ export function useMultiplayer() {
     },
     [room, sessionId, updateRoomData]
   );
+
+  // Start Game (Host only)
+  const startGame = useCallback(async () => {
+    if (!room?.id) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/room/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roomId: room.id,
+          sessionId,
+        }),
+      });
+
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Failed to start game');
+
+      updateRoomData(json.data);
+      return json.data;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to start game';
+      setError(msg);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [room, sessionId, updateRoomData]);
+
+  // Leave Room
+  const leaveRoom = useCallback(async () => {
+    const roomId = room?.id;
+    if (roomId) {
+      try {
+        await fetch('/api/room/leave', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            roomId,
+            sessionId,
+          }),
+        });
+      } catch {
+        // Keep going with local cleanup
+      }
+    }
+
+    setRoom(null);
+    setPlayers([]);
+    setMe(null);
+    setError(null);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('ludo_active_room_code');
+    }
+  }, [room, sessionId]);
 
   // Server-authoritative Dice Roll
   const rollDiceServer = useCallback(async () => {
@@ -248,9 +420,7 @@ export function useMultiplayer() {
       const json = await res.json();
       if (!json.success) {
         if (json.code === 'VERSION_CONFLICT') {
-          const refreshRes = await fetch(`/api/room/get?id=${room.id}`);
-          const refreshJson = await refreshRes.json();
-          if (refreshJson.success) updateRoomData(refreshJson.data);
+          await fetchRoomState();
         }
         throw new Error(json.error);
       }
@@ -262,7 +432,7 @@ export function useMultiplayer() {
       setError(msg);
       throw err;
     }
-  }, [room, sessionId, updateRoomData]);
+  }, [room, sessionId, fetchRoomState]);
 
   // Server-authoritative Move
   const makeMoveServer = useCallback(
@@ -284,9 +454,7 @@ export function useMultiplayer() {
         const json = await res.json();
         if (!json.success) {
           if (json.code === 'VERSION_CONFLICT') {
-            const refreshRes = await fetch(`/api/room/get?id=${room.id}`);
-            const refreshJson = await refreshRes.json();
-            if (refreshJson.success) updateRoomData(refreshJson.data);
+            await fetchRoomState();
           }
           throw new Error(json.error);
         }
@@ -299,69 +467,46 @@ export function useMultiplayer() {
         throw err;
       }
     },
-    [room, sessionId, updateRoomData]
+    [room, sessionId, fetchRoomState]
   );
 
-  // Reconnect
-  const reconnect = useCallback(async (codeToReconnect?: string) => {
-    const code =
-      codeToReconnect ||
-      (typeof window !== 'undefined' ? localStorage.getItem('ludo_active_room_code') : null);
+  // Determine if current user is the host
+  const isHost = Boolean(
+    me?.is_host ||
+    (room && sessionId && room.host_id === sessionId) ||
+    (me && me.seat_index === 0)
+  );
 
-    if (!code) return false;
-
-    setIsLoading(true);
-    setIsReconnecting(true);
-    try {
-      const sid = getOrCreateSessionId();
-      const res = await fetch('/api/room/reconnect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          roomCode: code,
-          sessionId: sid,
-        }),
-      });
-
-      const json = await res.json();
-      if (json.success && json.data) {
-        updateRoomData(json.data);
-        setIsReconnecting(false);
-        return true;
-      }
-      return false;
-    } catch {
-      return false;
-    } finally {
-      setIsLoading(false);
-      setIsReconnecting(false);
-    }
-  }, [updateRoomData]);
-
-  // Leave room
-  const leaveRoom = useCallback(() => {
-    setRoom(null);
-    setPlayers([]);
-    setMe(null);
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('ludo_active_room_code');
-    }
-  }, []);
+  // Single unified online screen router
+  const onlineScreen: OnlineScreen = room
+    ? room.status === 'waiting'
+      ? 'lobby'
+      : room.status === 'playing' || room.status === 'in_progress'
+      ? 'gameplay'
+      : room.status === 'finished'
+      ? 'result'
+      : null
+    : null;
 
   return {
     sessionId,
     room,
     players,
     me,
+    isHost,
+    onlineScreen,
     isLoading,
     error,
     isReconnecting,
+    isConnected,
     createRoom,
     joinRoom,
     toggleReady,
+    startGame,
+    leaveRoom,
     rollDiceServer,
     makeMoveServer,
     reconnect,
-    leaveRoom,
+    fetchRoomState,
   };
 }
