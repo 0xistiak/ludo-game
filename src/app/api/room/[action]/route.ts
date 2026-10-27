@@ -84,7 +84,8 @@ export async function GET(
     if (action === 'get') {
       const code = url.searchParams.get('code') || undefined;
       const id = url.searchParams.get('id') || undefined;
-      const result = await MultiplayerService.getRoomData({ code, id });
+      const sessionId = url.searchParams.get('sessionId') || request.headers.get('x-session-id') || undefined;
+      const result = await MultiplayerService.getRoomData({ code, id, sessionId });
       return NextResponse.json({ success: true, data: result });
     }
 

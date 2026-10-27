@@ -20,7 +20,7 @@ export interface RoomRow {
 export interface RoomPlayerRow {
   id: string;
   room_id: string;
-  session_id: string;
+  session_id?: string;
   name: string;
   color: PlayerColor;
   team: string;

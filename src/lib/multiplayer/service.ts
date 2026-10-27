@@ -26,6 +26,19 @@ function createServiceError(message: string, code?: string): ServiceError {
   return err;
 }
 
+/**
+ * Strips other players' session_ids so that clients cannot inspect or steal them.
+ */
+function sanitizePlayerList(players: RoomPlayerRow[], clientSessionId?: string): RoomPlayerRow[] {
+  return players.map((p) => {
+    const { session_id, ...safe } = p;
+    if (clientSessionId && session_id === clientSessionId) {
+      return { ...safe, session_id };
+    }
+    return safe;
+  });
+}
+
 export class MultiplayerService {
   /**
    * Creates a new multiplayer room.
@@ -101,7 +114,7 @@ export class MultiplayerService {
 
     return {
       room: room as RoomRow,
-      players: [player as RoomPlayerRow],
+      players: sanitizePlayerList([player as RoomPlayerRow], input.sessionId),
       me: player as RoomPlayerRow,
     };
   }
@@ -148,7 +161,7 @@ export class MultiplayerService {
       existingMe.is_connected = true;
       return {
         room: room as RoomRow,
-        players: players as RoomPlayerRow[],
+        players: sanitizePlayerList(players as RoomPlayerRow[], input.sessionId),
         me: existingMe as RoomPlayerRow,
       };
     }
@@ -208,7 +221,7 @@ export class MultiplayerService {
 
     return {
       room: room as RoomRow,
-      players: updatedPlayers,
+      players: sanitizePlayerList(updatedPlayers, input.sessionId),
       me: newPlayer as RoomPlayerRow,
     };
   }
@@ -285,7 +298,7 @@ export class MultiplayerService {
 
     return {
       room: updatedRoom,
-      players: playerList,
+      players: sanitizePlayerList(playerList, input.sessionId),
       me,
     };
   }
@@ -497,7 +510,7 @@ export class MultiplayerService {
 
     return {
       room: room as RoomRow,
-      players: playerList,
+      players: sanitizePlayerList(playerList, input.sessionId),
       me,
     };
   }
@@ -520,7 +533,7 @@ export class MultiplayerService {
   /**
    * Get room state by code or ID.
    */
-  static async getRoomData(identifier: { code?: string; id?: string }): Promise<MultiplayerRoomData> {
+  static async getRoomData(identifier: { code?: string; id?: string; sessionId?: string }): Promise<MultiplayerRoomData> {
     const supabase = getSupabaseServerClient();
     let query = supabase.from('rooms').select('*');
 
@@ -543,9 +556,15 @@ export class MultiplayerService {
       .eq('room_id', room.id)
       .order('seat_index', { ascending: true });
 
+    const playerList = (players || []) as RoomPlayerRow[];
+    const me = identifier.sessionId
+      ? playerList.find((p) => p.session_id === identifier.sessionId)
+      : undefined;
+
     return {
       room: room as RoomRow,
-      players: (players || []) as RoomPlayerRow[],
+      players: sanitizePlayerList(playerList, identifier.sessionId),
+      me,
     };
   }
 }
