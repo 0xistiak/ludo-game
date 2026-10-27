@@ -2,10 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
 import { MultiplayerService } from '../service';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://cxadtmbgybrqtipplhzn.supabase.co';
-const supabaseAnonKey =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN4YWR0bWJneWJycXRpcHBsaHpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMwOTQzNTQsImV4cCI6MjEwODY3MDM1NH0.5O_g-cb0tyT9a9BWUndMzLNmbBwN0zNVWhVci5zuhaE';
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
 // Create unprivileged client (anon role)
 const anonClient = createClient(supabaseUrl, supabaseAnonKey, {
@@ -153,33 +151,39 @@ describe('Multiplayer Security & RLS Isolation Tests', () => {
         sessionId: hostSession,
       });
 
-      const joined = await MultiplayerService.joinRoom({
-        roomCode: created.room.code,
-        playerName: 'Guest',
-        sessionId: guestSession,
-      });
-      expect(joined.me?.session_id).toBe(guestSession);
-      expect(joined.players.length).toBe(2);
+      try {
+        const joined = await MultiplayerService.joinRoom({
+          roomCode: created.room.code,
+          playerName: 'Guest',
+          sessionId: guestSession,
+        });
+        expect(joined.me?.session_id).toBe(guestSession);
+        expect(joined.players.length).toBe(2);
 
-      // Request as Guest: Host's session_id must be stripped
-      const guestView = await MultiplayerService.getRoomData({
-        code: created.room.code,
-        sessionId: guestSession,
-      });
+        // Request as Guest: Host's session_id must be stripped
+        const guestView = await MultiplayerService.getRoomData({
+          code: created.room.code,
+          sessionId: guestSession,
+        });
 
-      const hostInGuestView = guestView.players.find((p) => p.name === 'Host');
-      const guestInGuestView = guestView.players.find((p) => p.name === 'Guest');
+        const hostInGuestView = guestView.players.find((p) => p.name === 'Host');
+        const guestInGuestView = guestView.players.find((p) => p.name === 'Guest');
 
-      expect(hostInGuestView?.session_id).toBeUndefined();
-      expect(guestInGuestView?.session_id).toBe(guestSession);
+        expect(hostInGuestView?.session_id).toBeUndefined();
+        expect(guestInGuestView?.session_id).toBe(guestSession);
 
-      // Request without session: ALL session_ids must be stripped
-      const publicView = await MultiplayerService.getRoomData({
-        code: created.room.code,
-      });
+        // Request without session: ALL session_ids must be stripped
+        const publicView = await MultiplayerService.getRoomData({
+          code: created.room.code,
+        });
 
-      for (const p of publicView.players) {
-        expect(p.session_id).toBeUndefined();
+        for (const p of publicView.players) {
+          expect(p.session_id).toBeUndefined();
+        }
+      } finally {
+        const { getSupabaseServerClient } = await import('../../supabase/server');
+        const supabase = getSupabaseServerClient();
+        await supabase.from('rooms').delete().eq('id', created.room.id);
       }
     });
   });
