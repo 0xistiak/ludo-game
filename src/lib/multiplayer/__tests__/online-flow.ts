@@ -255,7 +255,7 @@ export async function runOnlineFlowCheck() {
 
     // 8. Test Move (if phase is need_move or setup a need_move state to verify move execution)
     const postRollState = validRollJson.data.room.state as GameState;
-    if (postRollState.phase === 'need_move' && legalMoves.length > 0) {
+    if ((postRollState.phase === 'need_move' || postRollState.phase === 'awaiting-move') && legalMoves.length > 0) {
       console.log('Step 8: Executing legal move via POST /api/room/move...');
       const moveReq = new NextRequest('http://localhost:3000/api/room/move', {
         method: 'POST',

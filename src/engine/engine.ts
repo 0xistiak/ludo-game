@@ -1,7 +1,7 @@
 /**
  * engine.ts
  *
- * Pure, deterministic Ludo game engine.
+ * Pure, deterministic Ludo game engine following classic Ludo King / Ludo Star behavior.
  * Zero React or DOM imports.
  * Fully injectable RNG for deterministic testing and server-authoritative play.
  */
@@ -26,6 +26,7 @@ import {
   RNG,
   TeamId,
   MoveRecord,
+  BonusRollReason,
 } from './types';
 
 /**
@@ -100,9 +101,13 @@ export function createGame(config: GameConfig): GameState {
     rules,
     players,
     activePlayerIndex: 0,
-    phase: 'need_roll',
+    currentPlayer: players[0].color,
+    phase: 'awaiting-roll',
+    diceValue: null,
     currentRoll: null,
     consecutiveSixes: 0,
+    rollAttempts: 0,
+    bonusRoll: null,
     tokens,
     legalMoves: [],
     winner: null,
@@ -114,14 +119,51 @@ export function createGame(config: GameConfig): GameState {
 }
 
 /**
- * Returns the list of token IDs that can legally move given the current roll.
+ * Returns the player whose tokens are currently controllable by the active player.
+ * In 2v2: when a player has finished all 4 tokens home, on their turn they roll and
+ * move their TEAMMATE's tokens.
+ */
+export function getControllablePlayer(state: GameState, player: Player): Player {
+  if (state.mode === '2v2' && player.team) {
+    const allHome = player.tokenIds.every(
+      (id) => state.tokens[id]?.step === STEP_HOME_GOAL
+    );
+    if (allHome) {
+      const teammate = state.players.find(
+        (p) => p.team === player.team && p.id !== player.id
+      );
+      if (teammate) {
+        return teammate;
+      }
+    }
+  }
+  return player;
+}
+
+/**
+ * Checks if all controllable unfinished tokens for the player are in base (none on board, none in home lane).
+ * When true, the player gets up to 3 roll attempts per turn to roll a 6.
+ */
+export function isPlayerAllInBase(state: GameState, player: Player): boolean {
+  const tokens = player.tokenIds.map((id) => state.tokens[id]).filter(Boolean);
+  const hasUnfinishedBase = tokens.some((t) => t.step === STEP_BASE);
+  const hasActiveOnBoard = tokens.some(
+    (t) => t.step >= STEP_START && t.step < STEP_HOME_GOAL
+  );
+  return hasUnfinishedBase && !hasActiveOnBoard;
+}
+
+/**
+ * Returns the de-duplicated list of token IDs that can legally move given the current roll.
+ * - All tokens in base represent ONE choice (tapping any base token brings one out).
+ * - Two same-color tokens on the exact same cell represent ONE choice.
  */
 export function getLegalMoves(state: GameState, rollOverride?: number): string[] {
   if (state.phase === 'game_over' || state.winner !== null) {
     return [];
   }
 
-  const roll = rollOverride ?? state.currentRoll;
+  const roll = rollOverride ?? state.diceValue ?? state.currentRoll;
   if (roll === null || roll < 1 || roll > 6) {
     return [];
   }
@@ -129,16 +171,17 @@ export function getLegalMoves(state: GameState, rollOverride?: number): string[]
   const activePlayer = state.players[state.activePlayerIndex];
   if (!activePlayer) return [];
 
-  const legal: string[] = [];
+  const controllablePlayer = getControllablePlayer(state, activePlayer);
+  const candidateIds: string[] = [];
 
-  for (const tokenId of activePlayer.tokenIds) {
+  for (const tokenId of controllablePlayer.tokenIds) {
     const token = state.tokens[tokenId];
     if (!token) continue;
 
     // Token in base: needs 6 to enter start cell (if needSixToLeaveBase rule is enabled)
     if (token.step === STEP_BASE) {
       if (roll === 6 || !state.rules.needSixToLeaveBase) {
-        legal.push(tokenId);
+        candidateIds.push(tokenId);
       }
       continue;
     }
@@ -154,17 +197,46 @@ export function getLegalMoves(state: GameState, rollOverride?: number): string[]
     if (targetStep > STEP_HOME_GOAL) {
       // Overshot the goal!
       if (!state.rules.exactRollToFinish) {
-        legal.push(tokenId);
+        candidateIds.push(tokenId);
       }
       // If exact roll needed, this token cannot move
       continue;
     }
 
     // Target step <= STEP_HOME_GOAL: valid move
-    legal.push(tokenId);
+    candidateIds.push(tokenId);
   }
 
-  return legal;
+  // De-duplicate equivalent choices:
+  // 1. All tokens in base (step === STEP_BASE) count as ONE choice.
+  // 2. Tokens of the same color on the same cell (step === same) count as ONE choice.
+  const seenFromSteps = new Set<number>();
+  const dedupedLegalMoves: string[] = [];
+
+  for (const tokenId of candidateIds) {
+    const token = state.tokens[tokenId];
+    if (!seenFromSteps.has(token.step)) {
+      seenFromSteps.add(token.step);
+      dedupedLegalMoves.push(tokenId);
+    }
+  }
+
+  return dedupedLegalMoves;
+}
+
+/**
+ * Helper: if exactly ONE legal choice exists, returns that tokenId for auto-move.
+ * Otherwise returns null (0 choices or 2+ distinct choices).
+ */
+export function getAutoMove(state: GameState): string | null {
+  if (state.phase !== 'awaiting-move' && state.phase !== 'need_move') {
+    return null;
+  }
+  const moves = state.legalMoves;
+  if (moves.length === 1) {
+    return moves[0];
+  }
+  return null;
 }
 
 /**
@@ -175,26 +247,108 @@ export function rollDice(
   state: GameState,
   rng: RNG = Math.random
 ): { state: GameState; roll: number; legalMoves: string[] } {
-  if (state.phase !== 'need_roll' || state.winner !== null) {
+  if (
+    (state.phase !== 'awaiting-roll' && state.phase !== 'need_roll') ||
+    state.winner !== null
+  ) {
     throw new Error(`Cannot roll dice during phase '${state.phase}'`);
   }
 
   const rawRoll = Math.floor(rng() * 6) + 1;
   const roll = Math.min(6, Math.max(1, rawRoll));
 
-  const consecutiveSixes = roll === 6 ? state.consecutiveSixes + 1 : 0;
   const activePlayer = state.players[state.activePlayerIndex];
+  const controllablePlayer = getControllablePlayer(state, activePlayer);
+  const isAllInBase = isPlayerAllInBase(state, controllablePlayer);
 
-  // Rule: 3 consecutive sixes forfeits the turn immediately
+  // Rule 3: All tokens in base -> up to 3 roll attempts per turn to roll a 6
+  if (isAllInBase && state.rules.threeRollAttemptsInBase) {
+    const currentAttempt = state.rollAttempts + 1;
+
+    if (roll === 6) {
+      // Got a 6 on this attempt! Can make a move
+      const legalMoves = getLegalMoves(state, 6);
+      const nextState: GameState = {
+        ...state,
+        phase: 'awaiting-move',
+        diceValue: 6,
+        currentRoll: 6,
+        consecutiveSixes: 1,
+        rollAttempts: 0,
+        bonusRoll: null,
+        legalMoves,
+        log: [
+          ...state.log,
+          `${activePlayer.name} rolled a 6 on attempt ${currentAttempt}/3!`,
+        ],
+      };
+      return {
+        state: nextState,
+        roll: 6,
+        legalMoves,
+      };
+    } else {
+      // Rolled 1..5
+      if (currentAttempt < 3) {
+        // Player gets another attempt this turn
+        const nextState: GameState = {
+          ...state,
+          phase: 'awaiting-roll',
+          diceValue: roll,
+          currentRoll: roll,
+          consecutiveSixes: 0,
+          rollAttempts: currentAttempt,
+          bonusRoll: null,
+          legalMoves: [],
+          log: [
+            ...state.log,
+            `${activePlayer.name} rolled ${roll} (attempt ${currentAttempt}/3 in base).`,
+          ],
+        };
+        return {
+          state: nextState,
+          roll,
+          legalMoves: [],
+        };
+      } else {
+        // All 3 attempts exhausted without a 6! Turn passes
+        const advanced = nextTurn({
+          ...state,
+          diceValue: roll,
+          currentRoll: roll,
+          rollAttempts: 0,
+          consecutiveSixes: 0,
+          legalMoves: [],
+          log: [
+            ...state.log,
+            `${activePlayer.name} used all 3 attempts without rolling a 6. Turn passed.`,
+          ],
+        });
+        return {
+          state: advanced,
+          roll,
+          legalMoves: [],
+        };
+      }
+    }
+  }
+
+  // Normal turn (at least 1 token is on track or in home lane)
+  const consecutiveSixes = roll === 6 ? state.consecutiveSixes + 1 : 0;
+
+  // Rule 4: 3 consecutive sixes forfeits the turn immediately
   if (consecutiveSixes === 3 && state.rules.threeConsecutiveSixesLoss) {
     const advanced = nextTurn({
       ...state,
+      diceValue: roll,
       currentRoll: roll,
       consecutiveSixes: 0,
+      rollAttempts: 0,
+      bonusRoll: null,
       legalMoves: [],
       log: [
         ...state.log,
-        `${activePlayer.name} rolled three 6s in a row! Turn forfeited.`,
+        `${activePlayer.name} rolled three 6s in a row! Third 6 cancelled and turn passed.`,
       ],
     });
     return {
@@ -209,11 +363,14 @@ export function rollDice(
 
   if (legalMoves.length === 0) {
     // No legal moves possible with this roll.
-    // Turn is skipped immediately to the next player.
+    // Turn passes immediately to the next player.
     const advanced = nextTurn({
       ...state,
+      diceValue: roll,
       currentRoll: roll,
       consecutiveSixes,
+      rollAttempts: 0,
+      bonusRoll: null,
       legalMoves: [],
       log: [
         ...state.log,
@@ -230,9 +387,11 @@ export function rollDice(
   // Player has legal moves to choose from
   const nextState: GameState = {
     ...state,
-    phase: 'need_move',
+    phase: 'awaiting-move',
+    diceValue: roll,
     currentRoll: roll,
     consecutiveSixes,
+    rollAttempts: 0,
     legalMoves,
     log: [
       ...state.log,
@@ -250,35 +409,55 @@ export function rollDice(
 /**
  * Applies a move by moving the specified token.
  * Validates the move, handles token capture, checks victory conditions,
- * and passes the turn or awards an extra turn accordingly.
+ * and passes the turn or awards a bonus roll accordingly.
  */
 export function applyMove(state: GameState, tokenId: string): GameState {
-  if (state.phase !== 'need_move') {
+  if (state.phase !== 'awaiting-move' && state.phase !== 'need_move') {
     throw new Error(`Cannot move during phase '${state.phase}'`);
   }
 
-  if (!state.legalMoves.includes(tokenId)) {
-    throw new Error(`Token '${tokenId}' is not a legal move.`);
-  }
-
-  const roll = state.currentRoll;
+  const roll = state.diceValue ?? state.currentRoll;
   if (roll === null) {
     throw new Error('No active roll to apply move');
   }
 
-  const activePlayer = state.players[state.activePlayerIndex];
   const token = state.tokens[tokenId];
   if (!token) {
     throw new Error(`Token '${tokenId}' not found`);
   }
 
+  // Check if tokenId is directly in legalMoves OR is an equivalent choice
+  // (e.g. user tapped another base token while base exit is legal, or another token on the same cell)
+  const isDirectlyLegal = state.legalMoves.includes(tokenId);
+  let isEquivalentLegal = false;
+
+  if (!isDirectlyLegal) {
+    for (const legalId of state.legalMoves) {
+      const legalToken = state.tokens[legalId];
+      if (legalToken && legalToken.color === token.color && legalToken.step === token.step) {
+        isEquivalentLegal = true;
+        break;
+      }
+    }
+  }
+
+  if (!isDirectlyLegal && !isEquivalentLegal) {
+    throw new Error(`Token '${tokenId}' is not a legal move.`);
+  }
+
+  const activePlayer = state.players[state.activePlayerIndex];
   const fromStep = token.step;
   let toStep: number;
+  const path: number[] = [];
 
   if (fromStep === STEP_BASE) {
     toStep = STEP_START;
+    path.push(STEP_BASE, STEP_START);
   } else {
     toStep = Math.min(STEP_HOME_GOAL, fromStep + roll);
+    for (let s = fromStep; s <= toStep; s++) {
+      path.push(s);
+    }
   }
 
   // Clone tokens map
@@ -301,6 +480,8 @@ export function applyMove(state: GameState, tokenId: string): GameState {
 
     if (!isSafe) {
       // Find opponent tokens occupying targetCell
+      const opponentTokensOnCell: Array<{ id: string; token: Token }> = [];
+
       for (const [otherId, otherToken] of Object.entries(updatedTokens)) {
         if (otherId === tokenId) continue;
         if (!isOnTrack(otherToken.step)) continue;
@@ -316,12 +497,33 @@ export function applyMove(state: GameState, tokenId: string): GameState {
           otherPlayer?.team === activePlayer.team;
 
         if (!isTeammate && otherToken.color !== token.color) {
-          // Opponent captured! Send back to base
-          updatedTokens[otherId] = {
-            ...otherToken,
+          opponentTokensOnCell.push({ id: otherId, token: otherToken });
+        }
+      }
+
+      // Check blockCannotBeCaptured rule:
+      // If blockCannotBeCaptured is true, 2+ same-color opponent tokens form a block and cannot be captured
+      let blockProtected = false;
+      if (state.rules.blockCannotBeCaptured && opponentTokensOnCell.length >= 2) {
+        const colorCounts = new Map<string, number>();
+        for (const item of opponentTokensOnCell) {
+          colorCounts.set(item.token.color, (colorCounts.get(item.token.color) || 0) + 1);
+        }
+        for (const count of colorCounts.values()) {
+          if (count >= 2) {
+            blockProtected = true;
+            break;
+          }
+        }
+      }
+
+      if (!blockProtected) {
+        for (const item of opponentTokensOnCell) {
+          updatedTokens[item.id] = {
+            ...item.token,
             step: STEP_BASE,
           };
-          capturedTokenIds.push(otherId);
+          capturedTokenIds.push(item.id);
         }
       }
     }
@@ -354,15 +556,35 @@ export function applyMove(state: GameState, tokenId: string): GameState {
     }
   }
 
+  // Determine if active player receives a bonus roll
+  const extraFromSix = roll === 6 && state.rules.sixGivesExtraTurn;
+  const extraFromCapture = capturedTokenIds.length > 0 && state.rules.captureGivesExtraTurn;
+  const extraFromHome = reachedHome && state.rules.homeFinishGivesExtraTurn;
+
+  let bonusReason: BonusRollReason | null = null;
+  if (extraFromCapture) {
+    bonusReason = 'capture';
+  } else if (extraFromHome) {
+    bonusReason = 'home';
+  } else if (extraFromSix) {
+    bonusReason = 'six';
+  }
+
+  const getsExtraTurn = bonusReason !== null;
+
   const moveRecord: MoveRecord = {
     tokenId,
     playerColor: token.color,
+    from: fromStep,
+    to: toStep,
     fromStep,
     toStep,
-    roll,
+    path,
     capturedTokenIds,
     reachedHome,
-    awardedExtraTurn: false,
+    awardedExtraTurn: getsExtraTurn,
+    bonusReason,
+    roll,
   };
 
   if (winner !== null) {
@@ -370,11 +592,13 @@ export function applyMove(state: GameState, tokenId: string): GameState {
       ...state,
       tokens: updatedTokens,
       phase: 'game_over',
+      diceValue: null,
       currentRoll: null,
       legalMoves: [],
       winner,
       winnerTeam,
       lastMove: moveRecord,
+      bonusRoll: null,
       log: [
         ...state.log,
         `${activePlayer.name} wins the game!`,
@@ -382,26 +606,23 @@ export function applyMove(state: GameState, tokenId: string): GameState {
     };
   }
 
-  // Determine if active player receives an extra turn
-  const extraFromSix = roll === 6 && state.rules.sixGivesExtraTurn;
-  const extraFromCapture = capturedTokenIds.length > 0 && state.rules.captureGivesExtraTurn;
-  const extraFromHome = reachedHome && state.rules.homeFinishGivesExtraTurn;
-
-  const getsExtraTurn = extraFromSix || extraFromCapture || extraFromHome;
-  moveRecord.awardedExtraTurn = getsExtraTurn;
-
   if (getsExtraTurn) {
     // Active player rolls again
     return {
       ...state,
       tokens: updatedTokens,
-      phase: 'need_roll',
+      phase: 'awaiting-roll',
+      diceValue: null,
       currentRoll: null,
       legalMoves: [],
       lastMove: moveRecord,
+      bonusRoll: {
+        hasBonus: true,
+        reason: bonusReason,
+      },
       log: [
         ...state.log,
-        `${activePlayer.name} moved token ${tokenId} and earned an extra roll!`,
+        `${activePlayer.name} moved token ${tokenId} and earned an extra roll (${bonusReason})!`,
       ],
     };
   }
@@ -416,7 +637,7 @@ export function applyMove(state: GameState, tokenId: string): GameState {
 
 /**
  * Passes turn to the next player.
- * Resets roll and consecutive sixes counters.
+ * Resets roll, attempt counter, and consecutive sixes counters.
  */
 export function nextTurn(state: GameState): GameState {
   if (state.phase === 'game_over') {
@@ -424,17 +645,18 @@ export function nextTurn(state: GameState): GameState {
   }
 
   const nextIndex = (state.activePlayerIndex + 1) % state.players.length;
-
-  // In 2v2, if a player's all 4 tokens are already home, check if game is still going
-  // If their partner still has tokens, turn passes normally so they can either pass or partner plays
   const nextPlayer = state.players[nextIndex];
 
   return {
     ...state,
     activePlayerIndex: nextIndex,
-    phase: 'need_roll',
+    currentPlayer: nextPlayer.color,
+    phase: 'awaiting-roll',
+    diceValue: null,
     currentRoll: null,
     consecutiveSixes: 0,
+    rollAttempts: 0,
+    bonusRoll: null,
     legalMoves: [],
     turnCount: state.turnCount + 1,
     log: [

@@ -163,7 +163,7 @@ describe('MultiplayerService Server Authoritative Validation', () => {
         tokenId: 'red_0',
         expectedVersion: 1,
       })
-    ).rejects.toThrow('Cannot make move during phase: need_roll');
+    ).rejects.toThrow(/Cannot make move during phase: (awaiting-roll|need_roll)/);
   });
 
   describe('startGame & toggleReady validation', () => {

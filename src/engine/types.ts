@@ -19,14 +19,18 @@ export interface LudoRuleset {
   threeConsecutiveSixesLoss: boolean;
   /** If true, token must roll the exact number of steps to reach center home */
   exactRollToFinish: boolean;
-  /** If true, capturing an opponent token grants an extra turn (default false) */
+  /** If true, capturing an opponent token grants an extra turn (classic Ludo King: true) */
   captureGivesExtraTurn: boolean;
-  /** If true, a token reaching center home grants an extra turn (default false) */
+  /** If true, a token reaching center home grants an extra turn (classic Ludo King: true) */
   homeFinishGivesExtraTurn: boolean;
   /** If true, star cells on the track protect tokens from capture */
   starCellsAreSafe: boolean;
   /** If true, start cells on the track protect tokens from capture */
   startCellsAreSafe: boolean;
+  /** If true, two or more same-color tokens forming a stack/block cannot be captured (default: false) */
+  blockCannotBeCaptured: boolean;
+  /** If true, player with all active tokens in base gets up to 3 roll attempts per turn to roll a 6 */
+  threeRollAttemptsInBase: boolean;
 }
 
 export const DEFAULT_RULESET: Readonly<LudoRuleset> = {
@@ -34,10 +38,12 @@ export const DEFAULT_RULESET: Readonly<LudoRuleset> = {
   sixGivesExtraTurn: true,
   threeConsecutiveSixesLoss: true,
   exactRollToFinish: true,
-  captureGivesExtraTurn: false,
-  homeFinishGivesExtraTurn: false,
+  captureGivesExtraTurn: true,
+  homeFinishGivesExtraTurn: true,
   starCellsAreSafe: true,
   startCellsAreSafe: true,
+  blockCannotBeCaptured: false,
+  threeRollAttemptsInBase: true,
 };
 
 export interface Token {
@@ -55,7 +61,7 @@ export interface Player {
   tokenIds: string[]; // 4 tokens per player
 }
 
-export type TurnPhase = 'need_roll' | 'need_move' | 'game_over';
+export type TurnPhase = 'awaiting-roll' | 'awaiting-move' | 'game_over' | 'need_roll' | 'need_move';
 
 export interface GameConfig {
   mode: GameMode;
@@ -66,15 +72,27 @@ export interface GameConfig {
   rules?: Partial<LudoRuleset>;
 }
 
+export type BonusRollReason = 'six' | 'capture' | 'home';
+
+export interface BonusRollState {
+  hasBonus: boolean;
+  reason: BonusRollReason | null;
+}
+
 export interface MoveRecord {
   tokenId: string;
   playerColor: PlayerColor;
-  fromStep: number;
-  toStep: number;
-  roll: number;
+  from: number;
+  to: number;
+  path: number[]; // Discrete steps traversed, e.g. [0, 1, 2, 3, 4] or [-1, 0]
   capturedTokenIds: string[];
   reachedHome: boolean;
   awardedExtraTurn: boolean;
+  bonusReason?: BonusRollReason | null;
+  roll: number;
+  // Aliases for backward compatibility
+  fromStep?: number;
+  toStep?: number;
   reason?: string;
 }
 
@@ -84,11 +102,15 @@ export interface GameState {
   rules: LudoRuleset;
   players: Player[];
   activePlayerIndex: number;
+  currentPlayer: PlayerColor; // Active player's color
   phase: TurnPhase;
-  currentRoll: number | null;
+  diceValue: number | null; // Current roll value
+  currentRoll: number | null; // Alias for diceValue
   consecutiveSixes: number;
+  rollAttempts: number; // 0..3 attempts in base
+  bonusRoll: BonusRollState | null;
   tokens: Record<string, Token>;
-  legalMoves: string[]; // tokenIds that can legally move with currentRoll
+  legalMoves: string[]; // De-duplicated legal choices
   winner: PlayerColor | TeamId | null;
   winnerTeam?: TeamId | null;
   lastMove: MoveRecord | null;

@@ -491,7 +491,7 @@ export class MultiplayerService {
       );
     }
 
-    if (currentState.phase !== 'need_roll') {
+    if (currentState.phase !== 'awaiting-roll' && currentState.phase !== 'need_roll') {
       throw new Error(`Cannot roll dice during phase: ${currentState.phase}`);
     }
 
@@ -578,7 +578,7 @@ export class MultiplayerService {
       );
     }
 
-    if (currentState.phase !== 'need_move') {
+    if (currentState.phase !== 'awaiting-move' && currentState.phase !== 'need_move') {
       throw new Error(`Cannot make move during phase: ${currentState.phase}`);
     }
 
