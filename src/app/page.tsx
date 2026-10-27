@@ -48,7 +48,7 @@ export default function LudoPage() {
     return loadPreferences().playerName || 'Player 1';
   });
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
-    return loadPreferences().soundEnabled ?? false;
+    return loadPreferences().soundEnabled ?? true;
   });
   const [autoMoveEnabled, setAutoMoveEnabled] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {

@@ -12,6 +12,7 @@
 
 import React from 'react';
 import { Volume2, VolumeX, AlertTriangle, X, BookOpen } from 'lucide-react';
+import { sound } from '@/utils/audio';
 
 interface ModalWrapperProps {
   isOpen: boolean;
@@ -24,20 +25,25 @@ const ModalWrapper: React.FC<ModalWrapperProps> = ({ isOpen, onClose, title, chi
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
-      <div className="relative w-full max-w-sm rounded-3xl glass-card p-6 border border-slate-700/60 shadow-2xl animate-scale-up">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+      <div className="relative w-full max-w-sm max-h-[calc(100dvh-2rem)] flex flex-col rounded-3xl glass-card p-5 sm:p-6 border border-slate-700/60 shadow-2xl animate-scale-up overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-700/50">
+        <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-700/50 shrink-0">
           <h3 className="text-lg font-extrabold text-slate-100">{title}</h3>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => {
+              sound.playButton();
+              onClose();
+            }}
             className="p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition"
           >
             <X size={20} />
           </button>
         </div>
-        {children}
+        <div className="overflow-y-auto flex-1 min-h-0 pr-0.5">
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -186,10 +192,23 @@ export const SettingsModal: React.FC<{
           </button>
         </div>
 
+        {/* Test sound button */}
+        <button
+          type="button"
+          id="test-sound-button"
+          onClick={() => {
+            sound.playTestSoundSequence();
+          }}
+          className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/40 text-blue-200 text-xs font-bold transition active:scale-95 shadow-md"
+        >
+          <Volume2 size={16} /> Test Sound FX (Click, Dice, Win)
+        </button>
+
         {/* Rules button */}
         <button
           type="button"
           onClick={() => {
+            sound.playButton();
             onClose();
             onOpenRules();
           }}
@@ -221,13 +240,13 @@ export const RulesModal: React.FC<{
 }> = ({ isOpen, onClose }) => {
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title="Classic Ludo Rules">
-      <div className="max-h-[60vh] overflow-y-auto space-y-3 pr-1 text-xs sm:text-sm text-slate-300">
+      <div className="space-y-3 pr-1 text-xs sm:text-sm text-slate-300">
         <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-700/40">
           <div className="font-bold text-slate-100 text-sm flex items-center gap-1.5 mb-1">
-            <span>🎲</span> Leaving Base & 3 Attempts
+            <span>🎲</span> Leaving Base & Turns
           </div>
           <p>
-            A token leaves base only on rolling a <strong>6</strong>. When all your tokens are in base (none on the track or in home lane), you get up to <strong>3 roll attempts</strong> in your turn to roll a 6!
+            A token leaves base only on rolling a <strong>6</strong>. Each turn starts with a single roll. If the roll is not a 6 and no token can legally move, turn passes to the next player.
           </p>
         </div>
 

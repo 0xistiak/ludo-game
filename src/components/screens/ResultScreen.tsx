@@ -66,9 +66,10 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
   }
 
   return (
-    <div className="relative w-full h-full max-w-md mx-auto flex flex-col justify-between p-4 sm:p-6 overflow-y-auto">
-      {/* Top Victory Crown Header */}
-      <div className="flex flex-col items-center text-center mt-2 z-10 select-none">
+    <div className="h-screen h-[100dvh] max-h-[100dvh] w-full max-w-md mx-auto flex flex-col justify-between p-3 sm:p-5 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] pt-[calc(0.75rem+env(safe-area-inset-top,0px))] pl-[calc(0.75rem+env(safe-area-inset-left,0px))] pr-[calc(0.75rem+env(safe-area-inset-right,0px))] overflow-hidden select-none">
+      <div className="flex-1 min-h-0 overflow-y-auto pr-0.5 flex flex-col justify-center">
+        {/* Top Victory Crown Header */}
+        <div className="flex flex-col items-center text-center mt-1 z-10 select-none">
         {/* Golden Crown */}
         <div className="w-20 h-16 relative flex items-center justify-center mb-1">
           <svg viewBox="0 0 100 80" className="w-full h-full drop-shadow-[0_0_15px_rgba(250,204,21,0.7)]">
@@ -129,9 +130,10 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
           </div>
         </div>
       </div>
+      </div>
 
       {/* Actions */}
-      <div className="space-y-3 z-10">
+      <div className="space-y-2 z-10 shrink-0 pt-1">
         <button
           id="play-again-button"
           type="button"
@@ -139,7 +141,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
             sound.playButton();
             onPlayAgain();
           }}
-          className="w-full py-4 px-6 rounded-2xl btn-gold text-lg font-black uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 transition"
+          className="w-full py-3.5 px-6 rounded-2xl btn-gold text-base sm:text-lg font-black uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 transition"
         >
           <RotateCcw size={20} /> Play Again
         </button>
@@ -150,12 +152,12 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
             sound.playButton();
             onPlayAgain();
           }}
-          className="w-full py-3.5 px-6 rounded-2xl btn-blue text-sm font-black uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 transition"
+          className="w-full py-3 px-6 rounded-2xl btn-blue text-xs sm:text-sm font-black uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 transition"
         >
           Rematch
         </button>
 
-        <div className="grid grid-cols-2 gap-2 pt-1">
+        <div className="grid grid-cols-2 gap-2 pt-0.5">
           <button
             id="home-button"
             type="button"
@@ -163,7 +165,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
               sound.playButton();
               onHome();
             }}
-            className="flex items-center justify-center gap-2 p-3 rounded-2xl glass-card border border-slate-700/60 hover:bg-slate-800/80 active:scale-95 transition text-xs font-bold text-slate-200"
+            className="flex items-center justify-center gap-2 p-2.5 rounded-2xl glass-card border border-slate-700/60 hover:bg-slate-800/80 active:scale-95 transition text-xs font-bold text-slate-200"
           >
             <Home size={16} /> Home
           </button>
@@ -175,7 +177,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
               sound.playButton();
               onShare();
             }}
-            className="flex items-center justify-center gap-2 p-3 rounded-2xl glass-card border border-slate-700/60 hover:bg-slate-800/80 active:scale-95 transition text-xs font-bold text-slate-200"
+            className="flex items-center justify-center gap-2 p-2.5 rounded-2xl glass-card border border-slate-700/60 hover:bg-slate-800/80 active:scale-95 transition text-xs font-bold text-slate-200"
           >
             <Share2 size={16} /> Share Match
           </button>

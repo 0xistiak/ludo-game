@@ -90,23 +90,23 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
   ];
 
   return (
-    <div className="relative w-full h-full max-w-md mx-auto flex flex-col justify-between p-4 sm:p-6 overflow-y-auto">
+    <div className="h-screen h-[100dvh] max-h-[100dvh] w-full max-w-md mx-auto flex flex-col justify-between p-3 sm:p-5 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] pt-[calc(0.75rem+env(safe-area-inset-top,0px))] pl-[calc(0.75rem+env(safe-area-inset-left,0px))] pr-[calc(0.75rem+env(safe-area-inset-right,0px))] overflow-hidden select-none">
       {/* Header with back button */}
-      <div className="flex items-center gap-3 pb-2 z-10">
+      <div className="flex items-center gap-3 pb-1.5 z-10 shrink-0">
         <button
           type="button"
           onClick={() => {
             sound.playButton();
             onBack();
           }}
-          className="w-10 h-10 rounded-2xl border border-slate-700/60 bg-slate-800/60 hover:bg-slate-700/60 flex items-center justify-center text-slate-300 hover:text-white transition"
+          className="w-10 h-10 rounded-2xl border border-slate-700/60 bg-slate-800/60 hover:bg-slate-700/60 flex items-center justify-center text-slate-300 hover:text-white transition active:scale-95 shadow-md"
         >
           <ArrowLeft size={20} />
         </button>
         <h2 className="text-xl sm:text-2xl font-black text-slate-100">Game Setup</h2>
       </div>
 
-      <div className="space-y-4 my-2 z-10">
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-3 my-1.5 pr-0.5 z-10">
         {/* 1. Game Mode Section */}
         <div>
           <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 block">
@@ -338,12 +338,12 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
       </div>
 
       {/* Primary Action Button: "Start Game →" */}
-      <div className="pt-2 pb-1 z-10">
+      <div className="pt-2 pb-1 z-10 shrink-0">
         <button
           id="start-game-button"
           type="button"
           onClick={handleStart}
-          className="w-full py-4 px-6 rounded-2xl btn-green text-base sm:text-lg font-black uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 transition"
+          className="w-full h-[52px] min-h-[52px] rounded-2xl btn-green text-base sm:text-lg font-black uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 transition shadow-lg"
         >
           Start Game →
         </button>

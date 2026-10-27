@@ -51,7 +51,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   };
 
   return (
-    <div className="relative w-full h-full max-w-md mx-auto flex flex-col justify-between p-3 sm:p-5 overflow-hidden select-none">
+    <div className="h-screen h-[100dvh] max-h-[100dvh] w-full max-w-md mx-auto flex flex-col justify-between p-3 sm:p-5 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] pt-[calc(0.75rem+env(safe-area-inset-top,0px))] pl-[calc(0.75rem+env(safe-area-inset-left,0px))] pr-[calc(0.75rem+env(safe-area-inset-right,0px))] overflow-hidden select-none">
       {/* Top Header Bar */}
       <div className="flex items-center justify-between z-10 shrink-0">
         <button
