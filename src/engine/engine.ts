@@ -115,6 +115,8 @@ export function createGame(config: GameConfig): GameState {
     winner: null,
     winnerTeam: null,
     lastMove: null,
+    lastDiceRoll: null,
+    rollSeq: 0,
     turnCount: 1,
     log: ['Game started'],
   };
@@ -343,11 +345,14 @@ export function rollDice(
       }
     }
 
+    const nextRollSeq = (state.rollSeq || 0) + 1;
     const advanced = nextTurn({
       ...state,
       tokens: restoredTokenMap,
       diceValue: roll,
       currentRoll: roll,
+      lastDiceRoll: roll,
+      rollSeq: nextRollSeq,
       consecutiveSixes: 0,
       bonusRoll: null,
       legalMoves: [],
@@ -371,6 +376,7 @@ export function rollDice(
 
   // Calculate legal moves for this roll (each turn starts with exactly ONE roll)
   const legalMoves = getLegalMoves(state, roll);
+  const nextRollSeq = (state.rollSeq || 0) + 1;
 
   if (legalMoves.length === 0) {
     // No legal moves possible with this roll.
@@ -379,6 +385,8 @@ export function rollDice(
       ...state,
       diceValue: roll,
       currentRoll: roll,
+      lastDiceRoll: roll,
+      rollSeq: nextRollSeq,
       consecutiveSixes,
       bonusRoll: null,
       legalMoves: [],
@@ -401,6 +409,8 @@ export function rollDice(
     phase: 'awaiting-move',
     diceValue: roll,
     currentRoll: roll,
+    lastDiceRoll: roll,
+    rollSeq: nextRollSeq,
     consecutiveSixes,
     revertedTurn: null,
     legalMoves,

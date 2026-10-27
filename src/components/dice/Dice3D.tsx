@@ -10,13 +10,14 @@
 
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Image from 'next/image';
 import { PlayerColor } from '@/engine';
 import { sound } from '@/utils/audio';
 
 interface Dice3DProps {
   currentRoll: number | null;
+  lastRoll?: number | null;
   canRoll: boolean;
   activeColor: PlayerColor;
   onRoll: () => void;
@@ -28,6 +29,7 @@ interface Dice3DProps {
 
 export const Dice3D: React.FC<Dice3DProps> = ({
   currentRoll,
+  lastRoll,
   canRoll,
   activeColor,
   onRoll,
@@ -38,20 +40,41 @@ export const Dice3D: React.FC<Dice3DProps> = ({
 }) => {
   const [isRolling, setIsRolling] = useState(false);
   const [tumblingFace, setTumblingFace] = useState<number>(1);
+  const [persistedRoll, setPersistedRoll] = useState<number | null>(null);
   const isFirstMountRef = useRef(true);
   const lastHandledRollIdRef = useRef<string | number | null>(null);
   const currentRollRef = useRef<number | null>(currentRoll);
+  const lastRollRef = useRef<number | null>(lastRoll ?? currentRoll ?? null);
 
   useEffect(() => {
     currentRollRef.current = currentRoll;
+    if (currentRoll !== null) {
+      lastRollRef.current = currentRoll;
+    }
   }, [currentRoll]);
 
-  // Run the smooth ~600ms decelerating random tumble sequence
-  const startTumble = (onComplete?: () => void) => {
+  useEffect(() => {
+    if (lastRoll !== undefined && lastRoll !== null) {
+      lastRollRef.current = lastRoll;
+    }
+  }, [lastRoll]);
+
+  // Keep displayed face visible for ~1400ms after currentRoll goes null so opponent and roller can read the number
+  useEffect(() => {
+    if (currentRoll === null && persistedRoll !== null && !isRolling) {
+      const timer = setTimeout(() => {
+        setPersistedRoll(null);
+      }, 1400);
+      return () => clearTimeout(timer);
+    }
+  }, [currentRoll, persistedRoll, isRolling]);
+
+  // Run the smooth ~540ms decelerating random tumble sequence
+  const startTumble = useCallback((onComplete?: () => void) => {
     setIsRolling(true);
     sound.playDiceRoll();
 
-    const delays = [40, 45, 50, 60, 75, 95, 115, 120];
+    const delays = [35, 40, 45, 55, 70, 85, 100, 110];
     let step = 0;
     let timer: NodeJS.Timeout | null = null;
 
@@ -68,8 +91,10 @@ export const Dice3D: React.FC<Dice3DProps> = ({
       if (step < delays.length) {
         timer = setTimeout(tick, delays[step]);
       } else {
-        // Tumble sequence complete (~600ms total)
+        // Tumble sequence complete (~540ms total)
         setIsRolling(false);
+        const resolvedFace = currentRollRef.current ?? lastRollRef.current ?? tumblingFace;
+        setPersistedRoll(resolvedFace);
         onComplete?.();
       }
     };
@@ -79,7 +104,7 @@ export const Dice3D: React.FC<Dice3DProps> = ({
     return () => {
       if (timer) clearTimeout(timer);
     };
-  };
+  }, [tumblingFace]);
 
   // Trigger roll animation for opponent rolls when roll arrives from server
   useEffect(() => {
@@ -104,7 +129,13 @@ export const Dice3D: React.FC<Dice3DProps> = ({
     const prefersReducedMotion =
       typeof window !== 'undefined' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReducedMotion) return;
+    if (prefersReducedMotion) {
+      const resolved = currentRollRef.current ?? lastRollRef.current ?? null;
+      if (resolved) {
+        setPersistedRoll(resolved);
+      }
+      return;
+    }
 
     // Opponent's roll arrived: tumble asynchronously then display result
     let cleanupFn: (() => void) | undefined;
@@ -116,7 +147,7 @@ export const Dice3D: React.FC<Dice3DProps> = ({
       clearTimeout(startTimer);
       cleanupFn?.();
     };
-  }, [rollId, isMyTurn]);
+  }, [rollId, isMyTurn, startTumble]);
 
   const handleRollClick = () => {
     if (!canRoll || disabled || isRolling) return;
@@ -134,6 +165,8 @@ export const Dice3D: React.FC<Dice3DProps> = ({
     onRoll();
     startTumble();
   };
+
+  const activeFace = isRolling ? tumblingFace : (currentRoll ?? persistedRoll);
 
   const ringGlows: Record<PlayerColor, string> = {
     red: 'rgba(239, 68, 68, 0.65)',
@@ -261,12 +294,13 @@ export const Dice3D: React.FC<Dice3DProps> = ({
               strokeWidth="1.5"
             />
 
-            {/* Pips: only shown when rolling or when currentRoll !== null */}
-            {(isRolling || currentRoll !== null) && renderPips(isRolling ? tumblingFace : currentRoll!)}
+            {/* Pips: only shown when rolling or when activeFace !== null */}
+            {(isRolling || activeFace !== null) &&
+              renderPips(isRolling ? tumblingFace : (activeFace || 1))}
           </svg>
 
           {/* Idle State: PlayWebLudo Logo on plain white dice, no pips, no number */}
-          {!isRolling && currentRoll === null && (
+          {!isRolling && activeFace === null && (
             <div className="absolute inset-0 flex items-center justify-center p-3 pointer-events-none">
               <Image
                 id="dice-idle-logo"
@@ -294,13 +328,21 @@ export const Dice3D: React.FC<Dice3DProps> = ({
           <span className="text-xs sm:text-sm font-bold text-yellow-400 animate-pulse">
             Rolling...
           </span>
+        ) : currentRoll ? (
+          <span className="text-xs sm:text-sm font-bold text-slate-300">
+            Rolled {currentRoll} — Select a token
+          </span>
+        ) : activeFace ? (
+          <span className="text-xs sm:text-sm font-bold text-amber-300">
+            Rolled {activeFace}
+          </span>
         ) : canRoll && !disabled && isMyTurn ? (
           <span className="text-xs sm:text-sm font-bold text-emerald-400 animate-bounce">
             Tap to Roll!
           </span>
         ) : (
           <span className="text-xs text-slate-400">
-            {currentRoll ? `Rolled ${currentRoll} — Select a token` : 'Waiting for turn'}
+            Waiting for turn
           </span>
         )}
       </div>

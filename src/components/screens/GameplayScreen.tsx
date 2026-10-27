@@ -173,7 +173,7 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
     autoMoveExecutingRef.current = true;
     const timer = setTimeout(() => {
       handleSelectToken(singleMove);
-    }, 350);
+    }, 1100);
 
     return () => {
       clearTimeout(timer);
@@ -189,6 +189,35 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
       sound.playError();
     }
   }, [gameState.revertedTurn]);
+
+  // In online multiplayer, detect when any player's roll resulted in no legal moves
+  const lastProcessedRollSeqRef = useRef<number>(gameState.rollSeq ?? 0);
+  useEffect(() => {
+    const currentSeq = gameState.rollSeq ?? 0;
+    if (isOnline && currentSeq > lastProcessedRollSeqRef.current) {
+      lastProcessedRollSeqRef.current = currentSeq;
+
+      // If phase is awaiting-roll and lastDiceRoll exists, turn passed because there were no legal moves
+      if (gameState.phase === 'awaiting-roll' && gameState.lastDiceRoll !== null && !gameState.revertedTurn) {
+        const rollVal = gameState.lastDiceRoll;
+        const startTimer = setTimeout(() => {
+          showToast(`No move (rolled ${rollVal})`, 1600);
+          setIsNoMovePause(true);
+          setNoMoveRoll(rollVal);
+        }, 0);
+        const endTimer = setTimeout(() => {
+          setIsNoMovePause(false);
+          setNoMoveRoll(null);
+        }, 1600);
+        return () => {
+          clearTimeout(startTimer);
+          clearTimeout(endTimer);
+        };
+      }
+    } else {
+      lastProcessedRollSeqRef.current = currentSeq;
+    }
+  }, [isOnline, gameState.rollSeq, gameState.phase, gameState.lastDiceRoll, gameState.revertedTurn]);
 
   // Handle dice roll
   const handleRoll = () => {
@@ -219,15 +248,15 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
       }
 
       if (result.legalMoves.length === 0) {
-        // Show "No move" for ~1400ms so the rolled face is clearly visible then pass
-        showToast('No move', 1400);
+        // Show "No move" for ~1600ms so the rolled face is clearly visible then pass
+        showToast(`No move (rolled ${result.roll})`, 1600);
         setIsNoMovePause(true);
         setNoMoveRoll(result.roll);
         setTimeout(() => {
           setIsNoMovePause(false);
           setNoMoveRoll(null);
           onUpdateState(result.state);
-        }, 1400);
+        }, 1600);
       } else {
         onUpdateState(result.state);
 
@@ -470,12 +499,13 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
         {/* 3D Dice with bonus badge */}
         <Dice3D
           currentRoll={activeRoll}
+          lastRoll={gameState.lastDiceRoll}
           canRoll={isPhaseRoll && isMyTurn && !isAnimating && !isNoMovePause}
           disabled={!isPhaseRoll || !isMyTurn || isAnimating || isNoMovePause}
           activeColor={activePlayer.color}
           onRoll={handleRoll}
           bonusReason={bonusReason}
-          rollId={`${gameState.turnCount}_${activeRoll ?? 'none'}_${gameState.consecutiveSixes}_${isOnline ? (roomCode || 'online') : 'local'}`}
+          rollId={`${gameState.rollSeq ?? 0}_${gameState.turnCount}_${gameState.lastDiceRoll ?? activeRoll ?? 'none'}_${isOnline ? (roomCode || 'online') : 'local'}`}
           isMyTurn={isMyTurn}
         />
 

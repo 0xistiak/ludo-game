@@ -127,6 +127,8 @@ export interface GameState {
   winner: PlayerColor | TeamId | null;
   winnerTeam?: TeamId | null;
   lastMove: MoveRecord | null;
+  lastDiceRoll: number | null; // Persists across nextTurn so opponent client can display what was rolled
+  rollSeq?: number; // Monotonically increasing roll sequence ID
   turnCount: number;
   log: string[];
 }
