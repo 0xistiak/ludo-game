@@ -389,6 +389,23 @@ export class MultiplayerService {
   }
 
   /**
+   * Auto-expire rooms with no activity for 30 minutes (status 'abandoned').
+   */
+  static async expireInactiveRooms(): Promise<void> {
+    try {
+      const supabase = getSupabaseServerClient();
+      const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      await supabase
+        .from('rooms')
+        .update({ status: 'abandoned', updated_at: new Date().toISOString() })
+        .in('status', ['waiting', 'playing', 'in_progress'])
+        .lt('updated_at', cutoff);
+    } catch {
+      // Best-effort cleanup
+    }
+  }
+
+  /**
    * Leave room handling for host or guest.
    */
   static async leaveRoom(input: LeaveRoomInput): Promise<{ success: boolean }> {
@@ -413,19 +430,32 @@ export class MultiplayerService {
     const player = playerList.find((p) => p.session_id === input.sessionId);
     const isHost = room.host_id === input.sessionId || player?.seat_index === 0;
 
-    if (isHost) {
-      if (room.status === 'waiting') {
-        // Host leaves waiting room -> cancel & delete room
-        await supabase.from('rooms').delete().eq('id', room.id);
-      } else {
-        // Game was active -> mark abandoned
+    if (isHost && room.status === 'waiting') {
+      // Host leaves waiting room -> cancel & delete room
+      await supabase.from('rooms').delete().eq('id', room.id);
+    } else if (room.status === 'playing' || room.status === 'in_progress') {
+      // Someone leaves during active play -> mark them disconnected/abandoned and mark room abandoned so others see "Player left"
+      if (player) {
         await supabase
-          .from('rooms')
-          .update({ status: 'abandoned', updated_at: new Date().toISOString() })
-          .eq('id', room.id);
+          .from('room_players')
+          .update({ is_connected: false, last_seen_at: new Date().toISOString() })
+          .eq('id', player.id);
       }
+      await supabase
+        .from('rooms')
+        .update({
+          status: 'abandoned',
+          version: room.version + 1,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', room.id);
+    } else if (isHost) {
+      await supabase
+        .from('rooms')
+        .update({ status: 'abandoned', updated_at: new Date().toISOString() })
+        .eq('id', room.id);
     } else if (player) {
-      // Guest leaves -> remove player record and bump version
+      // Guest leaves waiting room -> remove player record and bump version
       await supabase.from('room_players').delete().eq('id', player.id);
       await supabase
         .from('rooms')
@@ -616,6 +646,9 @@ export class MultiplayerService {
     const supabase = getSupabaseServerClient();
     const code = input.roomCode.trim().toUpperCase();
 
+    // Clean up stale rooms first
+    await MultiplayerService.expireInactiveRooms();
+
     const { data: room, error: roomError } = await supabase
       .from('rooms')
       .select('*')
@@ -624,6 +657,28 @@ export class MultiplayerService {
 
     if (roomError || !room) {
       throw new Error('Room not found');
+    }
+
+    if (room.status === 'abandoned') {
+      throw new Error('Room has been abandoned or closed');
+    }
+
+    if (room.status === 'finished') {
+      throw new Error('Match has already finished');
+    }
+
+    if (room.status !== 'waiting' && room.status !== 'playing' && room.status !== 'in_progress') {
+      throw new Error(`Cannot restore room in status: ${room.status}`);
+    }
+
+    // Check 30 minutes inactivity cutoff
+    const lastActivity = new Date(room.updated_at || room.created_at).getTime();
+    if (Date.now() - lastActivity > 30 * 60 * 1000) {
+      await supabase
+        .from('rooms')
+        .update({ status: 'abandoned', updated_at: new Date().toISOString() })
+        .eq('id', room.id);
+      throw new Error('Room expired due to 30 minutes of inactivity');
     }
 
     const { data: players } = await supabase
@@ -635,14 +690,16 @@ export class MultiplayerService {
     const playerList = (players || []) as RoomPlayerRow[];
     const me = playerList.find((p) => p.session_id === input.sessionId);
 
-    if (me) {
-      await supabase
-        .from('room_players')
-        .update({ is_connected: true, last_seen_at: new Date().toISOString() })
-        .eq('id', me.id);
-
-      me.is_connected = true;
+    if (!me) {
+      throw new Error('Player is not a member of this room');
     }
+
+    await supabase
+      .from('room_players')
+      .update({ is_connected: true, last_seen_at: new Date().toISOString() })
+      .eq('id', me.id);
+
+    me.is_connected = true;
 
     return {
       room: room as RoomRow,
@@ -684,6 +741,18 @@ export class MultiplayerService {
     const { data: room, error: roomError } = await query.maybeSingle();
     if (roomError || !room) {
       throw new Error('Room not found');
+    }
+
+    const lastActivity = new Date(room.updated_at || room.created_at).getTime();
+    if (
+      (room.status === 'waiting' || room.status === 'playing' || room.status === 'in_progress') &&
+      Date.now() - lastActivity > 30 * 60 * 1000
+    ) {
+      await supabase
+        .from('rooms')
+        .update({ status: 'abandoned', updated_at: new Date().toISOString() })
+        .eq('id', room.id);
+      room.status = 'abandoned';
     }
 
     const { data: players } = await supabase

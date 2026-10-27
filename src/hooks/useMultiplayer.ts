@@ -9,6 +9,7 @@ import {
   GameMode,
 } from '@/types/multiplayer';
 import { PlayerColor } from '@/engine/geometry';
+import { isOnlineRoomValid } from '@/lib/session/gameSession';
 
 function getOrCreateSessionId(): string {
   if (typeof window === 'undefined') return 'server_session';
@@ -31,6 +32,7 @@ export function useMultiplayer() {
   const [error, setError] = useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
   const [isConnected, setIsConnected] = useState<boolean>(true);
+  const [opponentLeft, setOpponentLeft] = useState<boolean>(false);
 
   const heartbeatTimerRef = useRef<NodeJS.Timeout | null>(null);
   const roomRef = useRef<RoomRow | null>(null);
@@ -74,10 +76,7 @@ export function useMultiplayer() {
           if (typeof window !== 'undefined') {
             localStorage.removeItem('ludo_active_room_code');
           }
-          setRoom(null);
-          setPlayers([]);
-          setMe(null);
-          setError('Room was abandoned or closed.');
+          setOpponentLeft(true);
           return;
         }
 
@@ -114,7 +113,14 @@ export function useMultiplayer() {
             table: 'rooms',
             filter: `id=eq.${room.id}`,
           },
-          () => {
+          (payload) => {
+            const updated = payload.new as RoomRow | undefined;
+            if (updated?.status === 'abandoned') {
+              if (typeof window !== 'undefined') {
+                localStorage.removeItem('ludo_active_room_code');
+              }
+              setOpponentLeft(true);
+            }
             fetchRoomState();
           }
         )
@@ -240,18 +246,28 @@ export function useMultiplayer() {
     [sessionId, updateRoomData]
   );
 
-  // Auto-restore on page refresh
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
+  // Safe check for restorable room without auto-jumping into the board
+  const checkRestorableRoom = useCallback(async (): Promise<MultiplayerRoomData | null> => {
+    if (typeof window === 'undefined') return null;
     const cachedCode = localStorage.getItem('ludo_active_room_code');
-    if (cachedCode && !room) {
-      queueMicrotask(() => {
-        reconnect(cachedCode).catch(() => {
-          localStorage.removeItem('ludo_active_room_code');
-        });
-      });
+    if (!cachedCode) return null;
+
+    try {
+      const sid = sessionId || getOrCreateSessionId();
+      const res = await fetch(`/api/room/get?code=${cachedCode}&sessionId=${sid}`);
+      const json = await res.json();
+      if (json.success && json.data?.room) {
+        const { room: r, players: pl } = json.data;
+        if (isOnlineRoomValid(r, sid, pl)) {
+          return json.data;
+        }
+      }
+      localStorage.removeItem('ludo_active_room_code');
+      return null;
+    } catch {
+      return null;
     }
-  }, [reconnect, room]);
+  }, [sessionId]);
 
   // Create Room
   const createRoom = useCallback(
@@ -397,6 +413,7 @@ export function useMultiplayer() {
     setPlayers([]);
     setMe(null);
     setError(null);
+    setOpponentLeft(false);
     if (typeof window !== 'undefined') {
       localStorage.removeItem('ludo_active_room_code');
     }
@@ -499,6 +516,9 @@ export function useMultiplayer() {
     error,
     isReconnecting,
     isConnected,
+    opponentLeft,
+    setOpponentLeft,
+    checkRestorableRoom,
     createRoom,
     joinRoom,
     toggleReady,
