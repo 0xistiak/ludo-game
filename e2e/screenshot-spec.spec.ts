@@ -1,4 +1,4 @@
-import { test } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import path from 'path';
 
 test('Capture Screenshots of all screens for verification', async ({ page }) => {
@@ -19,8 +19,10 @@ test('Capture Screenshots of all screens for verification', async ({ page }) => 
   await page.setViewportSize({ width: 390, height: 844 });
 
   // 2. Setup Screen
-  await page.locator('#play-now-button').click();
-  await page.waitForTimeout(300);
+  await expect(async () => {
+    await page.locator('#play-now-button').click();
+    await expect(page.locator('#start-game-button')).toBeVisible({ timeout: 2000 });
+  }).toPass({ timeout: 15000 });
   await page.screenshot({ path: path.join(process.cwd(), 'design/screenshot-setup.png'), animations: 'disabled' });
 
   // 3. Gameplay Screen

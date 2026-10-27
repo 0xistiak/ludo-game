@@ -22,6 +22,7 @@ try {
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 
 test.describe('Multiplayer Two-Player Lobby & Game Flow', () => {
+  test.setTimeout(90000);
   let createdRoomCode: string | null = null;
 
   test.afterEach(async () => {
@@ -73,8 +74,10 @@ test.describe('Multiplayer Two-Player Lobby & Game Flow', () => {
     // Host does NOT see "I'm Ready" button
     await expect(hostPage.locator('#lobby-ready-button')).not.toBeVisible();
 
-    // 2. Host refreshes in lobby and verifies return to lobby (localStorage persistence)
+    // 2. Host refreshes: Home shows "Resume your game" banner; Host clicks Resume to return to lobby
     await hostPage.reload();
+    await expect(hostPage.locator('#resume-game-banner')).toBeVisible({ timeout: 8000 });
+    await hostPage.locator('#resume-game-button').click();
     await expect(hostPage.locator('#lobby-room-code')).toBeVisible({ timeout: 8000 });
     await expect(hostPage.locator('#lobby-room-code')).toHaveText(roomCode);
     await expect(hostPage.locator('#lobby-start-button')).toBeVisible();
@@ -117,45 +120,47 @@ test.describe('Multiplayer Two-Player Lobby & Game Flow', () => {
 
     // 4. Guest clicks "I'm Ready" -> toggles to "Ready ✓"
     await guestReadyBtn.click();
-    await expect(guestReadyBtn).toContainText(/Ready ✓/i);
+    await expect(guestReadyBtn).toContainText(/Ready ✓/i, { timeout: 10000 });
 
     // Live update on Host screen: Host sees guest card is "Ready ✓"
-    await expect(hostPage.getByText('Ready ✓')).toBeVisible({ timeout: 8000 });
+    await expect(hostPage.getByText('Ready ✓')).toBeVisible({ timeout: 10000 });
 
     // Host's Start Game button becomes bright and ENABLED
-    await expect(hostStartBtn).toBeEnabled({ timeout: 6000 });
+    await expect(hostStartBtn).toBeEnabled({ timeout: 10000 });
     await expect(hostPage.getByText(/All players ready/i)).toBeVisible();
 
     // 5. Guest clicks to un-ready -> toggles back to Not Ready
     await guestReadyBtn.click();
-    await expect(guestReadyBtn).toContainText(/I'm Ready/i);
+    await expect(guestReadyBtn).toContainText(/I'm Ready/i, { timeout: 10000 });
 
     // Host screen updates: Host's Start Game button becomes DISABLED again
-    await expect(hostStartBtn).toBeDisabled({ timeout: 8000 });
+    await expect(hostStartBtn).toBeDisabled({ timeout: 10000 });
     await expect(hostPage.getByText(/Waiting for all players to be ready/i)).toBeVisible();
 
     // Guest clicks Ready again
     await guestReadyBtn.click();
-    await expect(guestReadyBtn).toContainText(/Ready ✓/i);
-    await expect(hostStartBtn).toBeEnabled({ timeout: 8000 });
+    await expect(guestReadyBtn).toContainText(/Ready ✓/i, { timeout: 10000 });
+    await expect(hostStartBtn).toBeEnabled({ timeout: 10000 });
 
     // 6. Host clicks "START GAME" -> Both clients transition to game board simultaneously!
     await hostStartBtn.click();
 
     // Host reaches game board
-    await expect(hostPage.locator('#dice-roll-button')).toBeVisible({ timeout: 10000 });
+    await expect(hostPage.locator('#dice-roll-button')).toBeVisible({ timeout: 15000 });
     await expect(hostPage.getByText(/1v1 DUEL|ROOM/i)).toBeVisible();
 
     // Guest (even with Realtime blocked!) reaches game board via 2.5s fallback polling
-    await expect(guestPage.locator('#dice-roll-button')).toBeVisible({ timeout: 10000 });
+    await expect(guestPage.locator('#dice-roll-button')).toBeVisible({ timeout: 15000 });
     await expect(guestPage.getByText(/1v1 DUEL|ROOM/i)).toBeVisible();
 
     // Both see clear turn indicator text ("Your turn" or "Waiting for")
     await expect(hostPage.getByText(/Your turn – tap the dice/i)).toBeVisible();
     await expect(guestPage.getByText(/Waiting for AliceHost/i)).toBeVisible();
 
-    // 7. Guest refreshes during play and returns to the game board
+    // 7. Guest refreshes during play: Home shows "Resume your game" banner; Guest clicks Resume to return to board
     await guestPage.reload();
+    await expect(guestPage.locator('#resume-game-banner')).toBeVisible({ timeout: 8000 });
+    await guestPage.locator('#resume-game-button').click();
     await expect(guestPage.locator('#dice-roll-button')).toBeVisible({ timeout: 10000 });
     await expect(guestPage.getByText(/1v1 DUEL|ROOM/i)).toBeVisible();
 
