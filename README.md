@@ -26,9 +26,32 @@ Developed by **[istiak.tech](https://istiak.tech)**.
 
 ---
 
+## 📜 Classic Ludo Rules (`classic` ruleset)
+
+PlayWebLudo strictly follows classic Ludo King / Ludo Star gameplay rules:
+
+1. **Leaving Base**: A token leaves base only on rolling a **6** and enters its colored start cell.
+2. **Safe Cells**: 8 safe cells on the track (4 Start cells: Red 0, Green 13, Yellow 26, Blue 39; 4 Star cells: 8, 21, 34, 47). Tokens on safe cells cannot be captured.
+3. **Extra Roll on Six**: Rolling a 6 always awards an extra roll. The player may choose to EITHER bring a new token out of base OR move an existing token along the track/lane. Both choices are presented as distinct legal options.
+4. **Three Attempts in Base**: When a player has all active tokens in base (none on the track or in home lane), they get up to **3 roll attempts per turn** to roll a 6. If none is a 6, the turn passes. Tracked in state via `rollAttempts`.
+5. **Three Consecutive Sixes**: Rolling three 6s in a row cancels the third 6, awards no move, and passes the turn immediately.
+6. **Capture Bonus Roll**: Capturing an opponent token on any non-safe cell sends it back to its base yard AND awards the capturer an immediate bonus roll (`bonusReason: 'capture'`).
+7. **Home Reach Bonus Roll**: A token reaching center home awards an immediate bonus roll (`bonusReason: 'home'`).
+8. **Exact Roll to Finish**: Entering the center home requires an exact roll. If the roll is larger than needed, that token cannot move.
+9. **No Legal Move Pass**: If a roll produces no legal moves, the turn passes after a brief "No move" prompt.
+10. **Blocks / Stacks**: Tokens of the same color may share any cell. Teammates never capture each other. The engine supports a `blockCannotBeCaptured` config flag with **default `false`** (classic mode allows capturing stacks unless on safe cells; setting to `true` protects 2+ stacked same-color tokens).
+11. **Equivalent-Move De-duplication**: Moves that produce identical outcomes are de-duplicated:
+    - All tokens in base represent **ONE** legal choice.
+    - Two same-color tokens on the same cell represent **ONE** legal choice.
+12. **Auto-Move**: When `getAutoMove(state)` finds exactly ONE legal choice, it applies automatically after ~350ms (can be toggled in Settings). When 2+ choices exist, they are highlighted with pulsing glow rings and wait for tap.
+13. **2v2 Cooperative Teammate Control**: In 2v2 mode, when a player has finished all 4 of their tokens, on their turn they roll and move their **teammate's** tokens. A team wins when all 8 tokens are home.
+14. **Deterministic Server Authority**: The online multiplayer server runs the identical pure TypeScript engine with server-side cryptographically secure RNG.
+
+---
+
 ## 🧠 Pure Game Engine (`/src/engine`)
 
-The game engine is pure TypeScript with **zero React or DOM dependencies**, making it deterministic, unit-testable, and server-authoritative ready for Phase 2.
+The game engine is pure TypeScript with **zero React or DOM dependencies**, making it deterministic, unit-testable, and server-authoritative.
 
 - **Board Geometry (`geometry.ts`)**:
   - 52 shared perimeter track cells.
@@ -37,16 +60,24 @@ The game engine is pure TypeScript with **zero React or DOM dependencies**, maki
   - Explicit home lane entry cells: Red (51), Green (12), Yellow (25), Blue (38).
   - Safe cells: 4 start cells + 4 star cells (8, 21, 34, 47). Pawns on safe cells cannot be captured.
 - **Configurable Ruleset (`DEFAULT_RULESET`)**:
-  - Roll an exact **6** to leave base yard.
-  - Rolling a 6 grants an **extra turn**.
-  - **3 consecutive sixes rule**: Rolling three 6s in a row forfeits the turn immediately.
-  - **Exact roll needed** to reach center home (overshoots cannot move).
-  - Capturing an opponent sends their pawn back to base yard.
-  - Safe cells protect pawns from capture; multiple pawns can coexist on safe cells.
-  - Capturing or reaching home does not grant extra turns by default (configurable).
-- **Modes**:
-  - **1v1 Duel**: Two opposite colors active (e.g. Red vs Yellow). First player to bring all 4 pawns home wins.
-  - **2v2 Team Battle**: 4 players in cooperative play. Opposite colors are teammates (Team 1: Red + Yellow, Team 2: Green + Blue). Teammates cannot capture each other. A team wins when all 8 pawns of both teammates reach home.
+  - `needSixToLeaveBase: true`
+  - `sixGivesExtraTurn: true`
+  - `threeConsecutiveSixesLoss: true`
+  - `exactRollToFinish: true`
+  - `captureGivesExtraTurn: true`
+  - `homeFinishGivesExtraTurn: true`
+  - `starCellsAreSafe: true`
+  - `startCellsAreSafe: true`
+  - `blockCannotBeCaptured: false` (default)
+  - `threeRollAttemptsInBase: true`
+- **State Properties**:
+  - `currentPlayer`: Active player's color (`PlayerColor`).
+  - `diceValue` / `currentRoll`: Current dice roll.
+  - `phase`: `'awaiting-roll' | 'awaiting-move' | 'game_over'`.
+  - `consecutiveSixes`: Counter for consecutive sixes (0..3).
+  - `rollAttempts`: Counter for base roll attempts (0..3).
+  - `bonusRoll`: `{ hasBonus: boolean, reason: 'six' | 'capture' | 'home' | null }`.
+  - `lastMove`: `{ tokenId, from, to, path: number[], capturedTokenIds, reachedHome, awardedExtraTurn, bonusReason, roll }`.
 - **Deterministic RNG**: Dice rolling accepts an injectable RNG function `() => number` for deterministic simulation and automated testing.
 
 ---

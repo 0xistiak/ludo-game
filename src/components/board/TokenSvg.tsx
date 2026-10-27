@@ -114,6 +114,15 @@ export const TokenSvg: React.FC<TokenSvgProps> = ({
         </radialGradient>
       </defs>
 
+      {/* Large invisible hit circle for easy mobile tap targets */}
+      <circle
+        cx="0"
+        cy="0"
+        r={size * 1.15}
+        fill="transparent"
+        className={isLegal ? 'cursor-pointer pointer-events-auto' : 'pointer-events-none'}
+      />
+
       {/* Pulsing selection indicator ring when legal or selected */}
       {(isLegal || isSelected) && (
         <circle

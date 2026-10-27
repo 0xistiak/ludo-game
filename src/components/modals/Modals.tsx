@@ -113,8 +113,18 @@ export const SettingsModal: React.FC<{
   onClose: () => void;
   soundEnabled: boolean;
   onToggleSound: (enabled: boolean) => void;
+  autoMoveEnabled?: boolean;
+  onToggleAutoMove?: (enabled: boolean) => void;
   onOpenRules: () => void;
-}> = ({ isOpen, onClose, soundEnabled, onToggleSound, onOpenRules }) => {
+}> = ({
+  isOpen,
+  onClose,
+  soundEnabled,
+  onToggleSound,
+  autoMoveEnabled = true,
+  onToggleAutoMove,
+  onOpenRules,
+}) => {
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title="Settings">
       <div className="space-y-4">
@@ -127,12 +137,13 @@ export const SettingsModal: React.FC<{
             <div>
               <div className="text-sm font-bold text-slate-200">Game Sound FX</div>
               <div className="text-xs text-slate-400">
-                {soundEnabled ? 'Synthesized Audio ON' : 'Sound OFF (Default)'}
+                {soundEnabled ? 'Synthesized Audio ON' : 'Sound OFF'}
               </div>
             </div>
           </div>
           <button
             type="button"
+            id="sound-toggle-button"
             onClick={() => onToggleSound(!soundEnabled)}
             className={`w-12 h-6 rounded-full transition-colors relative ${
               soundEnabled ? 'bg-emerald-500' : 'bg-slate-600'
@@ -141,6 +152,35 @@ export const SettingsModal: React.FC<{
             <div
               className={`w-5 h-5 rounded-full bg-white transition-transform ${
                 soundEnabled ? 'translate-x-6' : 'translate-x-0.5'
+              }`}
+            />
+          </button>
+        </div>
+
+        {/* Auto-Move toggle */}
+        <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-800/60 border border-slate-700/50">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-slate-700 text-amber-400">
+              <span className="text-lg">⚡</span>
+            </div>
+            <div>
+              <div className="text-sm font-bold text-slate-200">Auto-Move Single Option</div>
+              <div className="text-xs text-slate-400">
+                {autoMoveEnabled ? 'Auto-move when only one choice (ON)' : 'Manual tap always (OFF)'}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            id="automove-toggle-button"
+            onClick={() => onToggleAutoMove && onToggleAutoMove(!autoMoveEnabled)}
+            className={`w-12 h-6 rounded-full transition-colors relative ${
+              autoMoveEnabled ? 'bg-emerald-500' : 'bg-slate-600'
+            }`}
+          >
+            <div
+              className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                autoMoveEnabled ? 'translate-x-6' : 'translate-x-0.5'
               }`}
             />
           </button>
@@ -161,14 +201,14 @@ export const SettingsModal: React.FC<{
             </div>
             <div className="text-left">
               <div className="text-sm font-bold text-slate-200">How to Play</div>
-              <div className="text-xs text-slate-400">Rules & movement guide</div>
+              <div className="text-xs text-slate-400">Classic Ludo rules & bonus guide</div>
             </div>
           </div>
           <span className="text-slate-400 text-sm">→</span>
         </button>
 
         <div className="pt-2 text-center text-[11px] text-slate-500">
-          Ludo v1.0 • Developed by istiak.tech
+          PlayWebLudo • Developed by istiak.tech
         </div>
       </div>
     </ModalWrapper>
@@ -180,41 +220,51 @@ export const RulesModal: React.FC<{
   onClose: () => void;
 }> = ({ isOpen, onClose }) => {
   return (
-    <ModalWrapper isOpen={isOpen} onClose={onClose} title="Ludo Rules">
+    <ModalWrapper isOpen={isOpen} onClose={onClose} title="Classic Ludo Rules">
       <div className="max-h-[60vh] overflow-y-auto space-y-3 pr-1 text-xs sm:text-sm text-slate-300">
         <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-700/40">
           <div className="font-bold text-slate-100 text-sm flex items-center gap-1.5 mb-1">
-            <span>🎲</span> Leaving Base
+            <span>🎲</span> Leaving Base & 3 Attempts
           </div>
-          <p>You must roll an exact <strong>6</strong> to move a pawn from your yard onto your start cell.</p>
+          <p>
+            A token leaves base only on rolling a <strong>6</strong>. When all your tokens are in base (none on the track or in home lane), you get up to <strong>3 roll attempts</strong> in your turn to roll a 6!
+          </p>
         </div>
 
         <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-700/40">
           <div className="font-bold text-slate-100 text-sm flex items-center gap-1.5 mb-1">
-            <span>🔄</span> Extra Turns & 3-Sixes Rule
+            <span>🔄</span> Rolling a 6 & Bonus Turns
           </div>
-          <p>Rolling a 6 grants an immediate extra roll. However, rolling <strong>3 sixes in a row</strong> forfeits your turn immediately!</p>
+          <p>
+            Rolling a 6 grants an immediate extra roll. You may choose to bring a token out or advance an existing token. <strong>3 consecutive sixes</strong> cancels the third 6 and passes the turn.
+          </p>
         </div>
 
         <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-700/40">
           <div className="font-bold text-slate-100 text-sm flex items-center gap-1.5 mb-1">
-            <span>⚔️</span> Capturing Pawns
+            <span>⚔️</span> Capture & Home Bonus Rolls
           </div>
-          <p>Landing on an opponent&apos;s pawn on a normal cell captures it and sends it back to their base yard.</p>
+          <p>
+            Capturing an opponent&apos;s token on an unsafe cell sends it back to base yard AND gives you a <strong>bonus roll</strong>! Reaching the center home also awards a <strong>bonus roll</strong>!
+          </p>
         </div>
 
         <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-700/40">
           <div className="font-bold text-slate-100 text-sm flex items-center gap-1.5 mb-1">
-            <span>⭐</span> Safe Cells
+            <span>⭐</span> Safe Cells & Stacks
           </div>
-          <p>Star cells (★) and Start cells (➜) are safe zones. Pawns on safe cells cannot be captured.</p>
+          <p>
+            The 4 start cells (➜) and 4 star cells (★) are safe zones where tokens cannot be captured. Same-color tokens can share any cell. Teammates never capture each other.
+          </p>
         </div>
 
         <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-700/40">
           <div className="font-bold text-slate-100 text-sm flex items-center gap-1.5 mb-1">
-            <span>🎯</span> Finishing & Winning
+            <span>🎯</span> Finishing, Winning & 2v2 Teammate Play
           </div>
-          <p>An exact roll is required to reach center home. In <strong>1v1</strong>, the first player to get all 4 pawns home wins. In <strong>2v2</strong>, opposite players are teammates; a team wins when all 8 pawns are home.</p>
+          <p>
+            An exact roll is required to enter center home. In <strong>2v2</strong>, when a player has finished all 4 tokens, on their turn they roll and move their <strong>teammate&apos;s</strong> tokens! The team wins when all 8 tokens reach home.
+          </p>
         </div>
       </div>
     </ModalWrapper>

@@ -43,6 +43,20 @@ export default function LudoPage() {
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     return loadPreferences().soundEnabled ?? false;
   });
+  const [autoMoveEnabled, setAutoMoveEnabled] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('ludo_auto_move_enabled');
+      return stored !== 'false';
+    }
+    return true;
+  });
+
+  const handleToggleAutoMove = (enabled: boolean) => {
+    setAutoMoveEnabled(enabled);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('ludo_auto_move_enabled', enabled ? 'true' : 'false');
+    }
+  };
 
   // Local game state (for offline / pass & play mode)
   const [localGameState, setLocalGameState] = useState<GameState | null>(null);
@@ -204,6 +218,7 @@ export default function LudoPage() {
             onOpenSettings={() => setSettingsModalOpen(true)}
             soundEnabled={soundEnabled}
             onToggleSound={handleToggleSound}
+            autoMoveEnabled={autoMoveEnabled}
             isOnline={true}
             myColor={me?.color}
             roomCode={room?.code}
@@ -260,6 +275,7 @@ export default function LudoPage() {
             onOpenSettings={() => setSettingsModalOpen(true)}
             soundEnabled={soundEnabled}
             onToggleSound={handleToggleSound}
+            autoMoveEnabled={autoMoveEnabled}
             isOnline={false}
           />
         )}
@@ -286,6 +302,8 @@ export default function LudoPage() {
         onClose={() => setSettingsModalOpen(false)}
         soundEnabled={soundEnabled}
         onToggleSound={handleToggleSound}
+        autoMoveEnabled={autoMoveEnabled}
+        onToggleAutoMove={handleToggleAutoMove}
         onOpenRules={() => setRulesModalOpen(true)}
       />
 

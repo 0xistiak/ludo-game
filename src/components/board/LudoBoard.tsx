@@ -3,16 +3,24 @@
  *
  * Full SVG implementation of the 15x15 Ludo board matching design/ui-spec.png.
  * 100% vector drawn, responsive, zero external images.
+ * Features:
+ * - Step-by-step hop along lastMove.path (110-140ms per step, <= 1.2s total)
+ * - Hop bounce, scale, and dynamic drop shadows
+ * - Base exit pop & slide, capture flash & flyback, home sparkle
+ * - Prefers-reduced-motion support (instant jump)
+ * - Brief highlight of last move's start and end cells
+ * - Tapping any base token or base area brings a token out when base-exit is legal
  */
 
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
   PlayerColor,
   GameState,
   START_CELLS,
   STAR_CELLS,
+  STEP_BASE,
 } from '@/engine';
 import {
   BOARD_SIZE,
@@ -29,24 +37,162 @@ interface LudoBoardProps {
   gameState: GameState;
   onSelectToken: (tokenId: string) => void;
   className?: string;
+  onAnimationStateChange?: (isAnimating: boolean) => void;
 }
 
 export const LudoBoard: React.FC<LudoBoardProps> = ({
   gameState,
   onSelectToken,
   className = '',
+  onAnimationStateChange,
 }) => {
-  const { tokens, legalMoves } = gameState;
+  const { tokens, legalMoves, lastMove, turnCount } = gameState;
+
+  // Animation state
+  const [animatingStep, setAnimatingStep] = useState<{
+    tokenId: string;
+    step: number;
+    isHopping: boolean;
+  } | null>(null);
+
+  const [highlightCells, setHighlightCells] = useState<{
+    fromCoord: Coord | null;
+    toCoord: Coord | null;
+  } | null>(null);
+
+  const [sparkleCoord, setSparkleCoord] = useState<Coord | null>(null);
+  const [capturedFlash, setCapturedFlash] = useState<{
+    tokenIds: string[];
+    coord: Coord;
+  } | null>(null);
+
+  // Track last handled move to avoid replaying on initial load/refresh
+  const lastHandledMoveKeyRef = useRef<string | null>(null);
+  const isFirstMountRef = useRef<boolean>(true);
+
+  // Active base exit eligibility
+  const activeColor = gameState.currentPlayer || gameState.players[gameState.activePlayerIndex]?.color;
+  const legalBaseTokenId = useMemo(() => {
+    return legalMoves.find((id) => {
+      const t = tokens[id];
+      return t && t.color === activeColor && t.step === STEP_BASE;
+    });
+  }, [legalMoves, tokens, activeColor]);
+
+  // Handle lastMove step-by-step animation
+  useEffect(() => {
+    if (!lastMove) return;
+
+    const moveKey = `${turnCount}_${lastMove.tokenId}_${lastMove.from}_${lastMove.to}`;
+
+    // On initial mount or page refresh: avoid replaying past animations
+    if (isFirstMountRef.current) {
+      isFirstMountRef.current = false;
+      lastHandledMoveKeyRef.current = moveKey;
+      return;
+    }
+
+    if (lastHandledMoveKeyRef.current === moveKey) {
+      return;
+    }
+    lastHandledMoveKeyRef.current = moveKey;
+
+    const token = tokens[lastMove.tokenId];
+    if (!token) return;
+
+    // Check prefers-reduced-motion
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const fromCoord = getTokenCoord(token.color, lastMove.from, token.index);
+    const toCoord = getTokenCoord(token.color, lastMove.to, token.index);
+
+    // Show highlight on start and destination cells briefly (~1.2s)
+    queueMicrotask(() => {
+      setHighlightCells({ fromCoord, toCoord });
+    });
+    const highlightTimer = setTimeout(() => {
+      setHighlightCells(null);
+    }, 1200);
+
+    if (prefersReducedMotion || !lastMove.path || lastMove.path.length <= 1) {
+      // Instant transition
+      return () => clearTimeout(highlightTimer);
+    }
+
+    // Step-by-step hop along path
+    onAnimationStateChange?.(true);
+
+    const path = lastMove.path;
+    const stepDuration = Math.min(140, Math.max(80, Math.floor(1000 / Math.max(1, path.length))));
+    let currentIdx = 0;
+
+    const stepInterval = setInterval(() => {
+      currentIdx++;
+      if (currentIdx < path.length) {
+        setAnimatingStep({
+          tokenId: lastMove.tokenId,
+          step: path[currentIdx],
+          isHopping: true,
+        });
+      } else {
+        clearInterval(stepInterval);
+        setAnimatingStep(null);
+
+        // Capture flash effect
+        if (lastMove.capturedTokenIds && lastMove.capturedTokenIds.length > 0) {
+          setCapturedFlash({
+            tokenIds: lastMove.capturedTokenIds,
+            coord: toCoord,
+          });
+          setTimeout(() => {
+            setCapturedFlash(null);
+            onAnimationStateChange?.(false);
+          }, 200);
+        } else if (lastMove.reachedHome) {
+          setSparkleCoord(toCoord);
+          setTimeout(() => {
+            setSparkleCoord(null);
+            onAnimationStateChange?.(false);
+          }, 300);
+        } else {
+          onAnimationStateChange?.(false);
+        }
+      }
+    }, stepDuration);
+
+    // Safety timeout: animation must NEVER block longer than 1.5s
+    const safetyTimeout = setTimeout(() => {
+      clearInterval(stepInterval);
+      setAnimatingStep(null);
+      setCapturedFlash(null);
+      setSparkleCoord(null);
+      onAnimationStateChange?.(false);
+    }, 1500);
+
+    return () => {
+      clearInterval(stepInterval);
+      clearTimeout(highlightTimer);
+      clearTimeout(safetyTimeout);
+      onAnimationStateChange?.(false);
+    };
+  }, [lastMove, turnCount, tokens, onAnimationStateChange]);
 
   // Group tokens by their rendered SVG coordinate to spread stacked tokens
   const tokenCoords = useMemo(() => {
     const map = new Map<string, { coord: Coord; isLegal: boolean; color: PlayerColor }>();
     const posCounts = new Map<string, number>();
 
-    // First pass: raw coords
+    // First pass: compute coords (using animatingStep if active)
     for (const [id, token] of Object.entries(tokens)) {
-      const coord = getTokenCoord(token.color, token.step, token.index);
-      const isLegal = legalMoves.includes(id);
+      let stepToRender = token.step;
+      if (animatingStep && animatingStep.tokenId === id) {
+        stepToRender = animatingStep.step;
+      }
+
+      const coord = getTokenCoord(token.color, stepToRender, token.index);
+      const isLegal = legalMoves.includes(id) || (Boolean(legalBaseTokenId) && token.color === activeColor && token.step === STEP_BASE);
       map.set(id, { coord, isLegal, color: token.color });
 
       const key = `${Math.round(coord.x)},${Math.round(coord.y)}`;
@@ -55,32 +201,44 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
 
     // Second pass: apply slight offset if more than 1 token on exact same spot
     const posCurrentIndex = new Map<string, number>();
-    const finalMap = new Map<string, { coord: Coord; isLegal: boolean; color: PlayerColor }>();
+    const finalMap = new Map<string, { coord: Coord; isLegal: boolean; color: PlayerColor; isHopping?: boolean }>();
 
     for (const [id, entry] of map.entries()) {
+      const isThisTokenAnimating = animatingStep?.tokenId === id;
       const key = `${Math.round(entry.coord.x)},${Math.round(entry.coord.y)}`;
       const total = posCounts.get(key) || 1;
       const index = posCurrentIndex.get(key) || 0;
       posCurrentIndex.set(key, index + 1);
 
-      if (total > 1) {
+      if (total > 1 && !isThisTokenAnimating) {
         // Offset in a small cluster circle
         const angle = (index / total) * Math.PI * 2;
         const radius = Math.min(10, 4 + total * 2);
         finalMap.set(id, {
           ...entry,
+          isHopping: isThisTokenAnimating,
           coord: {
             x: entry.coord.x + Math.cos(angle) * radius,
             y: entry.coord.y + Math.sin(angle) * radius,
           },
         });
       } else {
-        finalMap.set(id, entry);
+        finalMap.set(id, {
+          ...entry,
+          isHopping: isThisTokenAnimating,
+        });
       }
     }
 
     return finalMap;
-  }, [tokens, legalMoves]);
+  }, [tokens, legalMoves, legalBaseTokenId, activeColor, animatingStep]);
+
+  // Handle click on base yard directly
+  const handleBaseYardClick = (color: PlayerColor) => {
+    if (color === activeColor && legalBaseTokenId) {
+      onSelectToken(legalBaseTokenId);
+    }
+  };
 
   return (
     <div
@@ -125,14 +283,29 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
           <filter id="board-cell-shadow" x="-10%" y="-10%" width="120%" height="120%">
             <feDropShadow dx="0" dy="1" stdDeviation="0.8" floodColor="#000000" floodOpacity="0.2" />
           </filter>
+
+          <filter id="hop-shadow" x="-30%" y="-30%" width="160%" height="180%">
+            <feDropShadow dx="0" dy="8" stdDeviation="4" floodColor="#000000" floodOpacity="0.6" />
+          </filter>
         </defs>
 
-        {/* 1. Base Corner: Red (Top-Left: 0,0 to 240,240) */}
-        <g id="base-red">
+        {/* 1. Base Corner: Red */}
+        <g
+          id="base-red"
+          onClick={() => handleBaseYardClick('red')}
+          className={activeColor === 'red' && legalBaseTokenId ? 'cursor-pointer' : ''}
+        >
           <rect x="0" y="0" width="240" height="240" fill="url(#base-red-grad)" stroke="#1E293B" strokeWidth="2" rx="16" />
-          {/* Inner Yard Area */}
-          <rect x="36" y="36" width="168" height="168" fill="#1E293B" rx="14" opacity="0.4" />
-          {/* 4 Token Dock Seats */}
+          <rect
+            x="36"
+            y="36"
+            width="168"
+            height="168"
+            fill="#1E293B"
+            rx="14"
+            opacity={activeColor === 'red' && legalBaseTokenId ? 0.6 : 0.4}
+            className={activeColor === 'red' && legalBaseTokenId ? 'animate-pulse' : ''}
+          />
           {BASE_SPOTS.red.map((spot, i) => (
             <g key={`spot-red-${i}`}>
               <circle cx={spot.x} cy={spot.y} r="22" fill="#0F172A" stroke="#EF4444" strokeWidth="3" opacity="0.8" />
@@ -141,10 +314,23 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
           ))}
         </g>
 
-        {/* 2. Base Corner: Green (Top-Right: 360,0 to 600,240) */}
-        <g id="base-green">
+        {/* 2. Base Corner: Green */}
+        <g
+          id="base-green"
+          onClick={() => handleBaseYardClick('green')}
+          className={activeColor === 'green' && legalBaseTokenId ? 'cursor-pointer' : ''}
+        >
           <rect x="360" y="0" width="240" height="240" fill="url(#base-green-grad)" stroke="#1E293B" strokeWidth="2" rx="16" />
-          <rect x="396" y="36" width="168" height="168" fill="#1E293B" rx="14" opacity="0.4" />
+          <rect
+            x="396"
+            y="36"
+            width="168"
+            height="168"
+            fill="#1E293B"
+            rx="14"
+            opacity={activeColor === 'green' && legalBaseTokenId ? 0.6 : 0.4}
+            className={activeColor === 'green' && legalBaseTokenId ? 'animate-pulse' : ''}
+          />
           {BASE_SPOTS.green.map((spot, i) => (
             <g key={`spot-green-${i}`}>
               <circle cx={spot.x} cy={spot.y} r="22" fill="#0F172A" stroke="#22C55E" strokeWidth="3" opacity="0.8" />
@@ -153,10 +339,23 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
           ))}
         </g>
 
-        {/* 3. Base Corner: Yellow (Bottom-Right: 360,360 to 600,600) */}
-        <g id="base-yellow">
+        {/* 3. Base Corner: Yellow */}
+        <g
+          id="base-yellow"
+          onClick={() => handleBaseYardClick('yellow')}
+          className={activeColor === 'yellow' && legalBaseTokenId ? 'cursor-pointer' : ''}
+        >
           <rect x="360" y="360" width="240" height="240" fill="url(#base-yellow-grad)" stroke="#1E293B" strokeWidth="2" rx="16" />
-          <rect x="396" y="396" width="168" height="168" fill="#1E293B" rx="14" opacity="0.4" />
+          <rect
+            x="396"
+            y="396"
+            width="168"
+            height="168"
+            fill="#1E293B"
+            rx="14"
+            opacity={activeColor === 'yellow' && legalBaseTokenId ? 0.6 : 0.4}
+            className={activeColor === 'yellow' && legalBaseTokenId ? 'animate-pulse' : ''}
+          />
           {BASE_SPOTS.yellow.map((spot, i) => (
             <g key={`spot-yellow-${i}`}>
               <circle cx={spot.x} cy={spot.y} r="22" fill="#0F172A" stroke="#FACC15" strokeWidth="3" opacity="0.8" />
@@ -165,10 +364,23 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
           ))}
         </g>
 
-        {/* 4. Base Corner: Blue (Bottom-Left: 0,360 to 240,600) */}
-        <g id="base-blue">
+        {/* 4. Base Corner: Blue */}
+        <g
+          id="base-blue"
+          onClick={() => handleBaseYardClick('blue')}
+          className={activeColor === 'blue' && legalBaseTokenId ? 'cursor-pointer' : ''}
+        >
           <rect x="0" y="360" width="240" height="240" fill="url(#base-blue-grad)" stroke="#1E293B" strokeWidth="2" rx="16" />
-          <rect x="36" y="396" width="168" height="168" fill="#1E293B" rx="14" opacity="0.4" />
+          <rect
+            x="36"
+            y="396"
+            width="168"
+            height="168"
+            fill="#1E293B"
+            rx="14"
+            opacity={activeColor === 'blue' && legalBaseTokenId ? 0.6 : 0.4}
+            className={activeColor === 'blue' && legalBaseTokenId ? 'animate-pulse' : ''}
+          />
           {BASE_SPOTS.blue.map((spot, i) => (
             <g key={`spot-blue-${i}`}>
               <circle cx={spot.x} cy={spot.y} r="22" fill="#0F172A" stroke="#3B82F6" strokeWidth="3" opacity="0.8" />
@@ -188,7 +400,6 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
             const isYellowStart = idx === START_CELLS.yellow;
             const isBlueStart = idx === START_CELLS.blue;
 
-            // Fill color
             let cellFill = 'url(#normal-cell-grad)';
             let cellStroke = '#CBD5E1';
             if (isStar) {
@@ -290,7 +501,6 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
 
         {/* 6. Home Lanes (5 cells per color) */}
         <g id="home-lanes">
-          {/* Red Home Lane */}
           {HOME_LANES_GRID.red.map((cell, idx) => (
             <rect
               key={`home-red-${idx}`}
@@ -304,7 +514,6 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
               rx="4"
             />
           ))}
-          {/* Green Home Lane */}
           {HOME_LANES_GRID.green.map((cell, idx) => (
             <rect
               key={`home-green-${idx}`}
@@ -318,7 +527,6 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
               rx="4"
             />
           ))}
-          {/* Yellow Home Lane */}
           {HOME_LANES_GRID.yellow.map((cell, idx) => (
             <rect
               key={`home-yellow-${idx}`}
@@ -332,7 +540,6 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
               rx="4"
             />
           ))}
-          {/* Blue Home Lane */}
           {HOME_LANES_GRID.blue.map((cell, idx) => (
             <rect
               key={`home-blue-${idx}`}
@@ -348,18 +555,12 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
           ))}
         </g>
 
-        {/* 7. Center Home Triangles (240,240 to 360,360) */}
+        {/* 7. Center Home Triangles */}
         <g id="center-home">
-          {/* Left Red Triangle */}
           <polygon points="240,240 300,300 240,360" fill="#EF4444" stroke="#1E293B" strokeWidth="1" />
-          {/* Top Green Triangle */}
           <polygon points="240,240 300,300 360,240" fill="#22C55E" stroke="#1E293B" strokeWidth="1" />
-          {/* Right Yellow Triangle */}
           <polygon points="360,240 300,300 360,360" fill="#FACC15" stroke="#1E293B" strokeWidth="1" />
-          {/* Bottom Blue Triangle */}
           <polygon points="240,360 300,300 360,360" fill="#3B82F6" stroke="#1E293B" strokeWidth="1" />
-
-          {/* Golden Center Emblem / Star Trophy */}
           <circle cx="300" cy="300" r="16" fill="#F59E0B" stroke="#FEF08A" strokeWidth="2" style={{ filter: 'drop-shadow(0 0 6px rgba(245,158,11,0.8))' }} />
           <polygon
             points="300,288 304,297 313,298 306,304 308,313 300,308 292,313 294,304 287,298 296,297"
@@ -367,24 +568,91 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
           />
         </g>
 
-        {/* 8. Render Tokens on top with smooth micro-hops */}
-        <g id="tokens-layer">
-          {Array.from(tokenCoords.entries()).map(([id, item]) => (
-            <g
-              key={id}
-              transform={`translate(${item.coord.x}, ${item.coord.y})`}
-              style={{
-                transition: 'transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)',
-              }}
-            >
-              <TokenSvg
-                id={id}
-                color={item.color}
-                isLegal={item.isLegal}
-                onClick={() => onSelectToken(id)}
+        {/* Highlight start & end cells of last move */}
+        {highlightCells && (
+          <g id="move-highlights">
+            {highlightCells.fromCoord && (
+              <circle
+                cx={highlightCells.fromCoord.x}
+                cy={highlightCells.fromCoord.y}
+                r="18"
+                fill="none"
+                stroke="#94A3B8"
+                strokeWidth="2.5"
+                strokeDasharray="4 3"
+                opacity="0.8"
               />
-            </g>
-          ))}
+            )}
+            {highlightCells.toCoord && (
+              <circle
+                cx={highlightCells.toCoord.x}
+                cy={highlightCells.toCoord.y}
+                r="20"
+                fill="none"
+                stroke="#38BDF8"
+                strokeWidth="3"
+                className="animate-ping"
+                opacity="0.75"
+              />
+            )}
+          </g>
+        )}
+
+        {/* Capture flash effect */}
+        {capturedFlash && (
+          <circle
+            cx={capturedFlash.coord.x}
+            cy={capturedFlash.coord.y}
+            r="24"
+            fill="#EF4444"
+            opacity="0.75"
+            className="animate-ping"
+          />
+        )}
+
+        {/* Home sparkle celebration effect */}
+        {sparkleCoord && (
+          <g transform={`translate(${sparkleCoord.x}, ${sparkleCoord.y})`}>
+            <circle cx="0" cy="0" r="26" fill="#F59E0B" opacity="0.6" className="animate-ping" />
+            <polygon
+              points="0,-18 5,-5 18,0 5,5 0,18 -5,5 -18,0 -5,-5"
+              fill="#FEF08A"
+              style={{ filter: 'drop-shadow(0 0 8px #F59E0B)' }}
+            />
+          </g>
+        )}
+
+        {/* 8. Render Tokens on top with smooth step-by-step hops */}
+        <g id="tokens-layer">
+          {Array.from(tokenCoords.entries()).map(([id, item]) => {
+            const isHopping = item.isHopping;
+            return (
+              <g
+                key={id}
+                transform={`translate(${item.coord.x}, ${item.coord.y}) ${isHopping ? 'scale(1.25)' : 'scale(1)'}`}
+                style={{
+                  transition: isHopping
+                    ? 'transform 0.1s ease-out'
+                    : 'transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                  filter: isHopping ? 'url(#hop-shadow)' : undefined,
+                }}
+              >
+                <TokenSvg
+                  id={id}
+                  color={item.color}
+                  isLegal={item.isLegal}
+                  onClick={() => {
+                    // If token in base and base exit is legal, pass legalBaseTokenId
+                    if (tokens[id]?.step === STEP_BASE && legalBaseTokenId) {
+                      onSelectToken(legalBaseTokenId);
+                    } else {
+                      onSelectToken(id);
+                    }
+                  }}
+                />
+              </g>
+            );
+          })}
         </g>
       </svg>
     </div>

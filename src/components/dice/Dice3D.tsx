@@ -17,6 +17,9 @@ interface Dice3DProps {
   activeColor: PlayerColor;
   onRoll: () => void;
   disabled?: boolean;
+  bonusReason?: 'six' | 'capture' | 'home' | null;
+  rollAttempts?: number;
+  isAllInBase?: boolean;
 }
 
 export const Dice3D: React.FC<Dice3DProps> = ({
@@ -25,6 +28,9 @@ export const Dice3D: React.FC<Dice3DProps> = ({
   activeColor,
   onRoll,
   disabled = false,
+  bonusReason,
+  rollAttempts = 0,
+  isAllInBase = false,
 }) => {
   const [isRolling, setIsRolling] = useState(false);
   const [tumblingFace, setTumblingFace] = useState<number>(6);
@@ -37,16 +43,16 @@ export const Dice3D: React.FC<Dice3DProps> = ({
     setIsRolling(true);
     sound.playDiceRoll();
 
-    // Tumble face animation over 550ms
+    // Tumble face animation over 480ms (strictly < 600ms)
     const interval = setInterval(() => {
       setTumblingFace(Math.floor(Math.random() * 6) + 1);
-    }, 60);
+    }, 55);
 
     setTimeout(() => {
       clearInterval(interval);
       setIsRolling(false);
       onRoll();
-    }, 550);
+    }, 480);
   };
 
   const ringGlows: Record<PlayerColor, string> = {
@@ -183,6 +189,19 @@ export const Dice3D: React.FC<Dice3DProps> = ({
           </svg>
         </div>
       </button>
+
+      {/* Bonus Roll and Attempts Badges */}
+      {bonusReason && (
+        <div className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-black text-[10px] sm:text-xs shadow-lg animate-bounce z-20">
+          Roll again! ({bonusReason === 'six' ? 'Rolled a 6 🎲' : bonusReason === 'capture' ? 'Captured pawn ⚔️' : 'Reached Home 🏆'})
+        </div>
+      )}
+
+      {isAllInBase && !bonusReason && (
+        <div className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap px-2 py-0.5 rounded-full bg-blue-600/90 border border-blue-400 text-white font-extrabold text-[10px] shadow z-20">
+          3 tries to get a 6 {rollAttempts > 0 ? `(Try ${rollAttempts + 1}/3)` : ''}
+        </div>
+      )}
 
       {/* Helper text prompt below dice */}
       <div className="mt-2 text-center h-6">

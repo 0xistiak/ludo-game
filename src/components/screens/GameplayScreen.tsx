@@ -4,19 +4,24 @@
  * Full gameplay orchestrator matching Screen 3 from design/ui-spec.png:
  * - 4 player cards (or 2 in 1v1) with active turn glow, name, and mini token dots
  * - Responsive SVG Ludo Board fitting 100dvh without page scroll
- * - 3D Dice with tumbling animation and roll sound
+ * - 3D Dice with tumbling animation, roll sound, and bonus/attempts badges
+ * - Auto-move after ~350ms when exactly one legal choice exists (with settings toggle)
+ * - "No move" toast for ~700ms when roll produces no moves
+ * - Locked inputs during movement animation with instant unlock when done
  * - Turn prompt banner & move logs
  * - Pause/Restart dialog and Sound toggle
  */
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { RotateCcw, Volume2, VolumeX, MessageSquare, Smile, Settings as SettingsIcon } from 'lucide-react';
 import {
   GameState,
   applyMove,
   rollDice,
+  getAutoMove,
+  isPlayerAllInBase,
 } from '@/engine';
 import { LudoBoard } from '../board/LudoBoard';
 import { Dice3D } from '../dice/Dice3D';
@@ -39,6 +44,7 @@ interface GameplayScreenProps {
   isReconnecting?: boolean;
   isConnected?: boolean;
   onlinePlayers?: RoomPlayerRow[];
+  autoMoveEnabled?: boolean;
 }
 
 export const GameplayScreen: React.FC<GameplayScreenProps> = ({
@@ -56,23 +62,116 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
   isReconnecting = false,
   isConnected = true,
   onlinePlayers,
+  autoMoveEnabled = true,
 }) => {
-  const { mode, players, activePlayerIndex, phase, currentRoll, legalMoves, tokens } = gameState;
+  const { mode, players, activePlayerIndex, phase, currentRoll, diceValue, legalMoves, tokens } = gameState;
   const activePlayer = players[activePlayerIndex];
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isAnimating, setIsAnimating] = useState<boolean>(false);
+  const [isNoMovePause, setIsNoMovePause] = useState<boolean>(false);
 
-  const showToast = (msg: string) => {
+  // Auto-move execution guard to avoid double moves
+  const autoMoveExecutingRef = useRef<boolean>(false);
+
+  const showToast = (msg: string, durationMs = 2500) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 2500);
+    setTimeout(() => setToastMessage(null), durationMs);
   };
 
   const isMyTurn =
     !isOnline ||
     (Boolean(myColor) && activePlayer.color.toLowerCase() === myColor?.toLowerCase());
 
+  const isPhaseRoll = phase === 'awaiting-roll' || phase === 'need_roll';
+  const isPhaseMove = phase === 'awaiting-move' || phase === 'need_move';
+
+  // Handle token selection to move
+  const handleSelectToken = React.useCallback(
+    (tokenId: string) => {
+      if (!isPhaseMove || isAnimating) return;
+
+      // Check legality or equivalence
+      const isDirectlyLegal = legalMoves.includes(tokenId);
+      let isEquivalent = false;
+
+      if (!isDirectlyLegal) {
+        const tapped = tokens[tokenId];
+        if (tapped) {
+          for (const legalId of legalMoves) {
+            const lt = tokens[legalId];
+            if (lt && lt.color === tapped.color && lt.step === tapped.step) {
+              isEquivalent = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!isDirectlyLegal && !isEquivalent) return;
+
+      if (isOnline) {
+        if (!isMyTurn) {
+          showToast(`It is ${activePlayer.name}'s turn!`);
+          return;
+        }
+        if (onOnlineMove) {
+          onOnlineMove(tokenId).catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : 'Move failed';
+            showToast(msg);
+          });
+        }
+        return;
+      }
+
+      try {
+        const nextState = applyMove(gameState, tokenId);
+
+        // Audio feedback
+        if (nextState.lastMove?.reachedHome) {
+          sound.playHomeFinish();
+          showToast(`🎉 ${activePlayer.name}'s pawn reached Home! Bonus roll!`);
+        } else if ((nextState.lastMove?.capturedTokenIds.length || 0) > 0) {
+          sound.playCapture();
+          showToast(`⚔️ Captured opponent pawn! Bonus roll!`);
+        } else {
+          sound.playTokenStep();
+        }
+
+        onUpdateState(nextState);
+      } catch (e: unknown) {
+        console.error(e);
+      }
+    },
+    [isPhaseMove, isAnimating, legalMoves, tokens, isOnline, isMyTurn, onOnlineMove, activePlayer, gameState, onUpdateState]
+  );
+
+  // Auto-move after ~350ms if exactly one legal choice exists
+  useEffect(() => {
+    if (!isPhaseMove || !isMyTurn || isAnimating || isNoMovePause) {
+      autoMoveExecutingRef.current = false;
+      return;
+    }
+
+    const singleMove = getAutoMove(gameState);
+    if (!singleMove || !autoMoveEnabled || autoMoveExecutingRef.current) {
+      return;
+    }
+
+    autoMoveExecutingRef.current = true;
+    const timer = setTimeout(() => {
+      handleSelectToken(singleMove);
+    }, 350);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [isPhaseMove, isMyTurn, isAnimating, isNoMovePause, gameState, autoMoveEnabled, handleSelectToken]);
+
   // Handle dice roll
   const handleRoll = () => {
+    if (isAnimating || isNoMovePause) return;
+
     if (isOnline) {
       if (!isMyTurn) {
         showToast(`It is ${activePlayer.name}'s turn!`);
@@ -89,56 +188,26 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
 
     try {
       const result = rollDice(gameState);
-      onUpdateState(result.state);
 
       if (result.legalMoves.length === 0) {
-        showToast(`${activePlayer.name} rolled ${result.roll} — No moves! Turn skipped.`);
-      } else if (result.roll === 6) {
-        if (result.state.consecutiveSixes === 1) {
-          showToast('Rolled a 6! You get an extra roll after moving!');
-        } else if (result.state.consecutiveSixes === 2) {
-          showToast('Two 6s in a row! Careful: 3rd six forfeits turn!');
+        // Show "No move" for ~700ms then pass
+        showToast('No move', 700);
+        setIsNoMovePause(true);
+        setTimeout(() => {
+          setIsNoMovePause(false);
+          onUpdateState(result.state);
+        }, 700);
+      } else {
+        onUpdateState(result.state);
+
+        if (result.roll === 6) {
+          if (result.state.consecutiveSixes === 1) {
+            showToast('Rolled a 6! You get an extra roll after moving!');
+          } else if (result.state.consecutiveSixes === 2) {
+            showToast('Two 6s in a row! Careful: 3rd six forfeits turn!');
+          }
         }
       }
-    } catch (e: unknown) {
-      console.error(e);
-    }
-  };
-
-  // Handle token selection to move
-  const handleSelectToken = (tokenId: string) => {
-    if (phase !== 'need_move') return;
-    if (!legalMoves.includes(tokenId)) return;
-
-    if (isOnline) {
-      if (!isMyTurn) {
-        showToast(`It is ${activePlayer.name}'s turn!`);
-        return;
-      }
-      if (onOnlineMove) {
-        onOnlineMove(tokenId).catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : 'Move failed';
-          showToast(msg);
-        });
-      }
-      return;
-    }
-
-    try {
-      const nextState = applyMove(gameState, tokenId);
-
-      // Audio feedback
-      if (nextState.lastMove?.reachedHome) {
-        sound.playHomeFinish();
-        showToast(`🎉 ${activePlayer.name}'s pawn reached Home!`);
-      } else if ((nextState.lastMove?.capturedTokenIds.length || 0) > 0) {
-        sound.playCapture();
-        showToast(`⚔️ Captured opponent pawn!`);
-      } else {
-        sound.playTokenStep();
-      }
-
-      onUpdateState(nextState);
     } catch (e: unknown) {
       console.error(e);
     }
@@ -149,6 +218,12 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
   const pGreen = players.find((p) => p.color === 'green');
   const pYellow = players.find((p) => p.color === 'yellow');
   const pBlue = players.find((p) => p.color === 'blue');
+
+  const activeRoll = currentRoll ?? diceValue;
+  const isAllInBase = isPlayerAllInBase(gameState, activePlayer);
+  const bonusReason =
+    gameState.bonusRoll?.reason ||
+    (gameState.lastMove?.awardedExtraTurn ? gameState.lastMove.bonusReason : null);
 
   return (
     <div className="relative w-full h-full max-w-lg mx-auto flex flex-col justify-between p-2 sm:p-4 overflow-hidden select-none">
@@ -269,6 +344,7 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
         <LudoBoard
           gameState={gameState}
           onSelectToken={handleSelectToken}
+          onAnimationStateChange={setIsAnimating}
         />
       </div>
 
@@ -319,7 +395,7 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
             <>
               <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping" />
               <span>
-                {phase === 'need_roll'
+                {isPhaseRoll
                   ? 'Your turn – tap the dice'
                   : 'Your turn – select a pawn to move'}
               </span>
@@ -348,12 +424,16 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
           <Smile size={20} />
         </button>
 
-        {/* 3D Dice */}
+        {/* 3D Dice with bonus badge and attempts counter */}
         <Dice3D
-          currentRoll={currentRoll}
-          canRoll={phase === 'need_roll' && isMyTurn}
+          currentRoll={activeRoll}
+          canRoll={isPhaseRoll && isMyTurn && !isAnimating && !isNoMovePause}
+          disabled={!isPhaseRoll || !isMyTurn || isAnimating || isNoMovePause}
           activeColor={activePlayer.color}
           onRoll={handleRoll}
+          bonusReason={bonusReason}
+          rollAttempts={gameState.rollAttempts}
+          isAllInBase={isAllInBase}
         />
 
         {/* Rules quick preview button */}
