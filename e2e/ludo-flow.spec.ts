@@ -66,11 +66,15 @@ test.describe('Mobile Ludo User Flow (390x844)', () => {
     // Wait for rolling animation and settling
     await page.waitForTimeout(800);
 
-    // If legal tokens are highlighted, click the first legal token
+    // If legal tokens are highlighted and not already auto-moved, click the first legal token
     const legalToken = page.locator('.legal-token-glow').first();
-    if (await legalToken.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await legalToken.click();
-      await page.waitForTimeout(500);
+    try {
+      if (await legalToken.isVisible({ timeout: 1500 })) {
+        await legalToken.click({ timeout: 2000 });
+        await page.waitForTimeout(500);
+      }
+    } catch {
+      // Auto-move may have executed the single move automatically
     }
 
     // 6. Test Restart Match dialog
@@ -120,4 +124,61 @@ test.describe('Mobile Ludo User Flow (390x844)', () => {
       expect(isScrollable).toBe(false);
     }
   });
+
+  test('Dice roll animation runs cleanly and stops with no transform/animation running after completion', async ({ page }) => {
+    await page.goto('/');
+
+    await expect(async () => {
+      await page.locator('#play-now-button').click();
+      await expect(page.getByText('Game Setup')).toBeVisible({ timeout: 2000 });
+    }).toPass({ timeout: 15000 });
+
+    await page.locator('#start-game-button').click();
+    await expect(page.locator('#dice-roll-button')).toBeVisible({ timeout: 10000 });
+
+    const diceCube = page.locator('#dice-cube');
+    await expect(diceCube).toBeVisible();
+
+    // Trigger dice roll
+    await page.locator('#dice-roll-button').click();
+
+    // Wait until tumbling finishes (~600ms tumble animation)
+    await page.waitForTimeout(800);
+
+    // Verify dice has finished tumbling and has no residual transform/animation running
+    const diceState = await page.evaluate(() => {
+      const el = document.getElementById('dice-cube');
+      if (!el) return null;
+      const computed = window.getComputedStyle(el);
+      return {
+        hasTumbleClass: el.classList.contains('dice-tumbling'),
+        animationName: computed.animationName,
+        transform: computed.transform,
+      };
+    });
+
+    expect(diceState).not.toBeNull();
+    expect(diceState?.hasTumbleClass).toBe(false);
+    expect(diceState?.animationName).toBe('none');
+    expect(diceState?.transform).toBe('none');
+
+    // Wait another 400ms during token selection / phase settling to confirm it stays completely still
+    await page.waitForTimeout(400);
+
+    const diceStateAfterPause = await page.evaluate(() => {
+      const el = document.getElementById('dice-cube');
+      if (!el) return null;
+      const computed = window.getComputedStyle(el);
+      return {
+        hasTumbleClass: el.classList.contains('dice-tumbling'),
+        animationName: computed.animationName,
+        transform: computed.transform,
+      };
+    });
+
+    expect(diceStateAfterPause?.hasTumbleClass).toBe(false);
+    expect(diceStateAfterPause?.animationName).toBe('none');
+    expect(diceStateAfterPause?.transform).toBe('none');
+  });
 });
+
