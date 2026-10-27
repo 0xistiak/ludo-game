@@ -150,6 +150,26 @@ class SoundManager {
     });
   }
 
+  public playError(): void {
+    if (!this.soundEnabled) return;
+    const ctx = this.getAudioContext();
+    if (!ctx) return;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(220, ctx.currentTime);
+    osc.frequency.linearRampToValueAtTime(110, ctx.currentTime + 0.2);
+
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.21);
+  }
+
   public playVictory(): void {
     if (!this.soundEnabled) return;
     const ctx = this.getAudioContext();

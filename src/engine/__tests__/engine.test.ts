@@ -82,7 +82,7 @@ describe('Classic Ludo Game Engine (Rules & Auto-Move)', () => {
     expect(movedBase.tokens['red_1'].step).toBe(STEP_START);
   });
 
-  it('3. 3-attempt rule: all tokens in base gets up to 3 tries to roll a 6', () => {
+  it('3. One roll per turn: when all tokens in base and roll is not 6, turn passes immediately without 3 attempts', () => {
     const game = createGame({
       mode: '1v1',
       players: [
@@ -91,27 +91,20 @@ describe('Classic Ludo Game Engine (Rules & Auto-Move)', () => {
       ],
     });
 
-    // Attempt 1: roll a 4 (fails)
+    // Alice starts. Exactly 1 roll.
+    // Alice rolls a 4 (fails to bring token out of base)
     const try1 = rollDice(game, mockRNG(4));
-    expect(try1.state.rollAttempts).toBe(1);
-    expect(try1.state.activePlayerIndex).toBe(0); // Still Alice's turn!
-    expect(try1.state.phase).toBe('awaiting-roll');
+    expect(try1.roll).toBe(4);
     expect(try1.legalMoves).toHaveLength(0);
-
-    // Attempt 2: roll a 2 (fails)
-    const try2 = rollDice(try1.state, mockRNG(2));
-    expect(try2.state.rollAttempts).toBe(2);
-    expect(try2.state.activePlayerIndex).toBe(0); // Still Alice's turn!
-    expect(try2.state.phase).toBe('awaiting-roll');
-
-    // Attempt 3: roll a 3 (fails on 3rd attempt -> turn passes to Bob)
-    const try3 = rollDice(try2.state, mockRNG(3));
-    expect(try3.state.rollAttempts).toBe(0); // Resets
-    expect(try3.state.activePlayerIndex).toBe(1); // Turn passed to Bob!
-    expect(try3.state.phase).toBe('awaiting-roll');
+    // Turn passes immediately to Bob on non-6 with no legal moves
+    expect(try1.state.activePlayerIndex).toBe(1);
+    expect(try1.state.currentPlayer).toBe('yellow');
+    expect(try1.state.phase).toBe('awaiting-roll');
+    // Ensure rollAttempts state property is completely removed
+    expect((try1.state as unknown as Record<string, unknown>).rollAttempts).toBeUndefined();
   });
 
-  it('4. 3-attempt rule: rolling a 6 on attempt 2 or 3 succeeds and enables move', () => {
+  it('4. Roll of 1-5 allows freely moving ANY legal outside token (choice when 2+ outside)', () => {
     const game = createGame({
       mode: '1v1',
       players: [
@@ -120,23 +113,34 @@ describe('Classic Ludo Game Engine (Rules & Auto-Move)', () => {
       ],
     });
 
-    // Attempt 1: roll 1
-    const try1 = rollDice(game, mockRNG(1));
-    expect(try1.state.rollAttempts).toBe(1);
+    // Alice has two tokens outside: red_0 at step 5 and red_1 at step 10
+    const state: GameState = {
+      ...game,
+      tokens: {
+        ...game.tokens,
+        red_0: { id: 'red_0', color: 'red', index: 0, step: 5 },
+        red_1: { id: 'red_1', color: 'red', index: 1, step: 10 },
+      },
+    };
 
-    // Attempt 2: roll 6!
-    const try2 = rollDice(try1.state, mockRNG(6));
-    expect(try2.state.rollAttempts).toBe(0);
-    expect(try2.state.phase).toBe('awaiting-move');
-    expect(try2.legalMoves).toHaveLength(1);
-    expect(try2.legalMoves[0]).toBe('red_0');
+    // Roll 3: both red_0 and red_1 are legal choices
+    const rolled = rollDice(state, mockRNG(3));
+    expect(rolled.roll).toBe(3);
+    expect(rolled.legalMoves).toHaveLength(2);
+    expect(rolled.legalMoves).toContain('red_0');
+    expect(rolled.legalMoves).toContain('red_1');
 
-    // Apply move brings red_0 out
-    const moved = applyMove(try2.state, 'red_0');
-    expect(moved.tokens['red_0'].step).toBe(STEP_START);
+    // Auto-move MUST return null when 2+ distinct choices exist
+    expect(getAutoMove(rolled.state)).toBeNull();
+
+    // Player freely chooses to move red_1 instead of red_0
+    const moved = applyMove(rolled.state, 'red_1');
+    expect(moved.tokens['red_1'].step).toBe(13);
+    expect(moved.tokens['red_0'].step).toBe(5); // red_0 untouched
+    expect(moved.activePlayerIndex).toBe(1); // Normal turn pass
   });
 
-  it('5. Three consecutive sixes: 3rd six is cancelled and turn passes', () => {
+  it('5. Three consecutive sixes: full turn revert (all token moves and captures undone) and turn passes', () => {
     const game = createGame({
       mode: '1v1',
       players: [
@@ -145,22 +149,139 @@ describe('Classic Ludo Game Engine (Rules & Auto-Move)', () => {
       ],
     });
 
-    // Place one token on track so normal turns apply
-    const stateWithTokenOnTrack: GameState = {
+    // Setup:
+    // Red starts with red_0 at step 0 (start cell).
+    // Bob has yellow_0 at global track 6 (Yellow start is 26, so step 32 = (26 + 32) % 52 = 6).
+    const startTokens = {
+      ...game.tokens,
+      red_0: { id: 'red_0', color: 'red' as const, index: 0, step: 0 },
+      yellow_0: { id: 'yellow_0', color: 'yellow' as const, index: 0, step: 32 },
+    };
+
+    const stateAtTurnStart: GameState = {
+      ...game,
+      tokens: startTokens,
+      turnStartSnapshot: { ...startTokens },
+      consecutiveSixes: 0,
+      activePlayerIndex: 0,
+    };
+
+    // 1st Roll: 6
+    const roll1 = rollDice(stateAtTurnStart, mockRNG(6));
+    expect(roll1.state.consecutiveSixes).toBe(1);
+    // Move red_0 from 0 -> 6, capturing yellow_0!
+    const move1 = applyMove(roll1.state, 'red_0');
+    expect(move1.tokens['red_0'].step).toBe(6);
+    expect(move1.tokens['yellow_0'].step).toBe(STEP_BASE); // captured to base!
+    expect(move1.bonusRoll?.hasBonus).toBe(true);
+
+    // 2nd Roll: 6
+    const roll2 = rollDice(move1, mockRNG(6));
+    expect(roll2.state.consecutiveSixes).toBe(2);
+    // Move red_0 from 6 -> 12
+    const move2 = applyMove(roll2.state, 'red_0');
+    expect(move2.tokens['red_0'].step).toBe(12);
+    expect(move2.bonusRoll?.hasBonus).toBe(true);
+
+    // 3rd Roll: 6 -> triggers THREE SIXES FULL REVERT!
+    const roll3 = rollDice(move2, mockRNG(6));
+    expect(roll3.roll).toBe(6);
+    expect(roll3.legalMoves).toHaveLength(0);
+    expect(roll3.state.consecutiveSixes).toBe(0);
+    expect(roll3.state.bonusRoll).toBeNull();
+    expect(roll3.state.activePlayerIndex).toBe(1); // Turn passed to Bob!
+
+    // ALL token positions must be restored to turnStartSnapshot
+    expect(roll3.state.tokens['red_0'].step).toBe(0); // red_0 restored to step 0!
+    expect(roll3.state.tokens['yellow_0'].step).toBe(32); // yellow_0 returned from base back to step 32!
+
+    // Check revertedTurn metadata
+    expect(roll3.state.revertedTurn).not.toBeNull();
+    expect(roll3.state.revertedTurn?.playerColor).toBe('red');
+    expect(roll3.state.revertedTurn?.revertedTokens.length).toBeGreaterThan(0);
+  });
+
+  it('5B. Normal 6, 6, then non-6 keeps all moves made during the turn', () => {
+    const game = createGame({
+      mode: '1v1',
+      players: [
+        { name: 'Alice', color: 'red' },
+        { name: 'Bob', color: 'yellow' },
+      ],
+    });
+
+    const stateAtTurnStart: GameState = {
       ...game,
       tokens: {
         ...game.tokens,
         red_0: { id: 'red_0', color: 'red', index: 0, step: 0 },
       },
-      consecutiveSixes: 2, // Already rolled two 6s
+      turnStartSnapshot: {
+        ...game.tokens,
+        red_0: { id: 'red_0', color: 'red', index: 0, step: 0 },
+      },
     };
 
-    // Roll 3rd consecutive 6
-    const roll3rdSix = rollDice(stateWithTokenOnTrack, mockRNG(6));
-    expect(roll3rdSix.roll).toBe(6);
-    expect(roll3rdSix.state.consecutiveSixes).toBe(0);
-    expect(roll3rdSix.state.activePlayerIndex).toBe(1); // Turn passed immediately!
-    expect(roll3rdSix.legalMoves).toHaveLength(0);
+    // 1st Roll: 6 -> move red_0 from 0 -> 6
+    const roll1 = rollDice(stateAtTurnStart, mockRNG(6));
+    const move1 = applyMove(roll1.state, 'red_0');
+
+    // 2nd Roll: 6 -> move red_0 from 6 -> 12
+    const roll2 = rollDice(move1, mockRNG(6));
+    const move2 = applyMove(roll2.state, 'red_0');
+
+    // 3rd Roll: 3 (non-6) -> move red_0 from 12 -> 15
+    const roll3 = rollDice(move2, mockRNG(3));
+    expect(roll3.state.consecutiveSixes).toBe(0); // Non-6 resets counter
+    const move3 = applyMove(roll3.state, 'red_0');
+
+    // Turn ends normally without revert!
+    expect(move3.tokens['red_0'].step).toBe(15);
+    expect(move3.activePlayerIndex).toBe(1); // Turn passed to Bob
+    expect(move3.revertedTurn).toBeNull();
+  });
+
+  it('5C. Bonus roll from capture/home does not reset consecutive-six counter unless a non-6 is rolled', () => {
+    const game = createGame({
+      mode: '1v1',
+      players: [
+        { name: 'Alice', color: 'red' },
+        { name: 'Bob', color: 'yellow' },
+      ],
+    });
+
+    // Setup:
+    // red_0 at step 0
+    // yellow_0 at global cell 6 (step 32)
+    const startTokens = {
+      ...game.tokens,
+      red_0: { id: 'red_0', color: 'red' as const, index: 0, step: 0 },
+      yellow_0: { id: 'yellow_0', color: 'yellow' as const, index: 0, step: 32 },
+    };
+
+    const state: GameState = {
+      ...game,
+      tokens: startTokens,
+      turnStartSnapshot: { ...startTokens },
+    };
+
+    // 1st Roll: 6
+    const roll1 = rollDice(state, mockRNG(6));
+    expect(roll1.state.consecutiveSixes).toBe(1);
+    const move1 = applyMove(roll1.state, 'red_0'); // lands at 6, captures yellow_0
+    expect(move1.bonusRoll?.reason).toBe('capture'); // Bonus awarded from capture!
+
+    // 2nd Roll: 6 again! (consecutiveSixes continues counting: 1 -> 2)
+    const roll2 = rollDice(move1, mockRNG(6));
+    expect(roll2.state.consecutiveSixes).toBe(2);
+    const move2 = applyMove(roll2.state, 'red_0');
+
+    // 3rd Roll: 6 again! (consecutiveSixes reaches 3 -> triggers revert)
+    const roll3 = rollDice(move2, mockRNG(6));
+    expect(roll3.state.consecutiveSixes).toBe(0);
+    expect(roll3.state.activePlayerIndex).toBe(1); // Turn passed!
+    expect(roll3.state.tokens['red_0'].step).toBe(0); // Reverted!
+    expect(roll3.state.tokens['yellow_0'].step).toBe(32); // Reverted!
   });
 
   it('6. Capturing an opponent token gives bonus roll with reason "capture"', () => {

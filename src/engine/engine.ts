@@ -27,6 +27,7 @@ import {
   TeamId,
   MoveRecord,
   BonusRollReason,
+  RevertedTokenMove,
 } from './types';
 
 /**
@@ -106,7 +107,8 @@ export function createGame(config: GameConfig): GameState {
     diceValue: null,
     currentRoll: null,
     consecutiveSixes: 0,
-    rollAttempts: 0,
+    turnStartSnapshot: { ...tokens },
+    revertedTurn: null,
     bonusRoll: null,
     tokens,
     legalMoves: [],
@@ -259,98 +261,56 @@ export function rollDice(
 
   const activePlayer = state.players[state.activePlayerIndex];
   const controllablePlayer = getControllablePlayer(state, activePlayer);
-  const isAllInBase = isPlayerAllInBase(state, controllablePlayer);
 
-  // Rule 3: All tokens in base -> up to 3 roll attempts per turn to roll a 6
-  if (isAllInBase && state.rules.threeRollAttemptsInBase) {
-    const currentAttempt = state.rollAttempts + 1;
-
-    if (roll === 6) {
-      // Got a 6 on this attempt! Can make a move
-      const legalMoves = getLegalMoves(state, 6);
-      const nextState: GameState = {
-        ...state,
-        phase: 'awaiting-move',
-        diceValue: 6,
-        currentRoll: 6,
-        consecutiveSixes: 1,
-        rollAttempts: 0,
-        bonusRoll: null,
-        legalMoves,
-        log: [
-          ...state.log,
-          `${activePlayer.name} rolled a 6 on attempt ${currentAttempt}/3!`,
-        ],
-      };
-      return {
-        state: nextState,
-        roll: 6,
-        legalMoves,
-      };
-    } else {
-      // Rolled 1..5
-      if (currentAttempt < 3) {
-        // Player gets another attempt this turn
-        const nextState: GameState = {
-          ...state,
-          phase: 'awaiting-roll',
-          diceValue: roll,
-          currentRoll: roll,
-          consecutiveSixes: 0,
-          rollAttempts: currentAttempt,
-          bonusRoll: null,
-          legalMoves: [],
-          log: [
-            ...state.log,
-            `${activePlayer.name} rolled ${roll} (attempt ${currentAttempt}/3 in base).`,
-          ],
-        };
-        return {
-          state: nextState,
-          roll,
-          legalMoves: [],
-        };
-      } else {
-        // All 3 attempts exhausted without a 6! Turn passes
-        const advanced = nextTurn({
-          ...state,
-          diceValue: roll,
-          currentRoll: roll,
-          rollAttempts: 0,
-          consecutiveSixes: 0,
-          legalMoves: [],
-          log: [
-            ...state.log,
-            `${activePlayer.name} used all 3 attempts without rolling a 6. Turn passed.`,
-          ],
-        });
-        return {
-          state: advanced,
-          roll,
-          legalMoves: [],
-        };
-      }
-    }
-  }
-
-  // Normal turn (at least 1 token is on track or in home lane)
+  // Consecutive sixes tracking
   const consecutiveSixes = roll === 6 ? state.consecutiveSixes + 1 : 0;
 
-  // Rule 4: 3 consecutive sixes forfeits the turn immediately
+  // Rule: 3 consecutive sixes = FULL TURN REVERT
+  // On the third consecutive 6: cancel everything, restore ALL token positions to turnStartSnapshot
+  // (undoes the moves made with the first two sixes and any captures made during them).
   if (consecutiveSixes === 3 && state.rules.threeConsecutiveSixesLoss) {
+    const snapshot = state.turnStartSnapshot || state.tokens;
+    const shouldRevertCaptures = state.rules.revertCapturesOnThreeSixes !== false;
+
+    const revertedTokens: RevertedTokenMove[] = [];
+    const restoredTokenMap: Record<string, Token> = { ...state.tokens };
+
+    for (const [id, currentToken] of Object.entries(state.tokens)) {
+      const snapToken = snapshot[id];
+      if (!snapToken) continue;
+
+      const isControllable = controllablePlayer.tokenIds.includes(id);
+      if (isControllable || shouldRevertCaptures) {
+        if (currentToken.step !== snapToken.step) {
+          revertedTokens.push({
+            tokenId: id,
+            fromStep: currentToken.step,
+            toStep: snapToken.step,
+          });
+          restoredTokenMap[id] = { ...snapToken };
+        }
+      }
+    }
+
     const advanced = nextTurn({
       ...state,
+      tokens: restoredTokenMap,
       diceValue: roll,
       currentRoll: roll,
       consecutiveSixes: 0,
-      rollAttempts: 0,
       bonusRoll: null,
       legalMoves: [],
+      revertedTurn: {
+        turnCount: state.turnCount,
+        playerColor: activePlayer.color,
+        revertedTokens,
+      },
       log: [
         ...state.log,
-        `${activePlayer.name} rolled three 6s in a row! Third 6 cancelled and turn passed.`,
+        `Three 6s rolled by ${activePlayer.name}! Turn cancelled and all moves reverted.`,
       ],
     });
+
     return {
       state: advanced,
       roll,
@@ -358,7 +318,7 @@ export function rollDice(
     };
   }
 
-  // Calculate legal moves for this roll
+  // Calculate legal moves for this roll (each turn starts with exactly ONE roll)
   const legalMoves = getLegalMoves(state, roll);
 
   if (legalMoves.length === 0) {
@@ -369,9 +329,9 @@ export function rollDice(
       diceValue: roll,
       currentRoll: roll,
       consecutiveSixes,
-      rollAttempts: 0,
       bonusRoll: null,
       legalMoves: [],
+      revertedTurn: null,
       log: [
         ...state.log,
         `${activePlayer.name} rolled a ${roll} with no legal moves. Turn passed.`,
@@ -391,7 +351,7 @@ export function rollDice(
     diceValue: roll,
     currentRoll: roll,
     consecutiveSixes,
-    rollAttempts: 0,
+    revertedTurn: null,
     legalMoves,
     log: [
       ...state.log,
@@ -655,7 +615,7 @@ export function nextTurn(state: GameState): GameState {
     diceValue: null,
     currentRoll: null,
     consecutiveSixes: 0,
-    rollAttempts: 0,
+    turnStartSnapshot: { ...state.tokens },
     bonusRoll: null,
     legalMoves: [],
     turnCount: state.turnCount + 1,

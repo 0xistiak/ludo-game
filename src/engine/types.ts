@@ -29,8 +29,8 @@ export interface LudoRuleset {
   startCellsAreSafe: boolean;
   /** If true, two or more same-color tokens forming a stack/block cannot be captured (default: false) */
   blockCannotBeCaptured: boolean;
-  /** If true, player with all active tokens in base gets up to 3 roll attempts per turn to roll a 6 */
-  threeRollAttemptsInBase: boolean;
+  /** If true, three consecutive sixes reverts all moves and captures made during that turn back to turn start */
+  revertCapturesOnThreeSixes: boolean;
 }
 
 export const DEFAULT_RULESET: Readonly<LudoRuleset> = {
@@ -43,7 +43,7 @@ export const DEFAULT_RULESET: Readonly<LudoRuleset> = {
   starCellsAreSafe: true,
   startCellsAreSafe: true,
   blockCannotBeCaptured: false,
-  threeRollAttemptsInBase: true,
+  revertCapturesOnThreeSixes: true,
 };
 
 export interface Token {
@@ -96,6 +96,18 @@ export interface MoveRecord {
   reason?: string;
 }
 
+export interface RevertedTokenMove {
+  tokenId: string;
+  fromStep: number;
+  toStep: number;
+}
+
+export interface RevertedTurnRecord {
+  turnCount: number;
+  playerColor: PlayerColor;
+  revertedTokens: RevertedTokenMove[];
+}
+
 export interface GameState {
   config: GameConfig;
   mode: GameMode;
@@ -107,7 +119,8 @@ export interface GameState {
   diceValue: number | null; // Current roll value
   currentRoll: number | null; // Alias for diceValue
   consecutiveSixes: number;
-  rollAttempts: number; // 0..3 attempts in base
+  turnStartSnapshot: Record<string, Token>; // Snapshot at start of active player's turn for full 3-sixes revert
+  revertedTurn?: RevertedTurnRecord | null; // Set when 3 consecutive sixes cancels and reverts turn
   bonusRoll: BonusRollState | null;
   tokens: Record<string, Token>;
   legalMoves: string[]; // De-duplicated legal choices
