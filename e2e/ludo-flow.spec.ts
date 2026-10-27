@@ -53,7 +53,7 @@ test.describe('Mobile Ludo User Flow (390x844)', () => {
     // 4. Verify Gameplay Screen
     await expect(page.getByText('1v1 DUEL')).toBeVisible();
     await expect(page.getByText('Champion')).toBeVisible();
-    await expect(page.getByText('TURN')).toBeVisible();
+    await expect(page.getByText('TURN', { exact: true })).toBeVisible();
 
     // Verify 3D Dice and SVG board are present
     const diceBtn = page.locator('#dice-roll-button');
