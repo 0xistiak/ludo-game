@@ -242,12 +242,64 @@ export function getAutoMove(state: GameState): string | null {
 }
 
 /**
+ * Unbiased, cryptographically secure uniform random integer in [1, 6]
+ * using rejection sampling to eliminate modulo bias.
+ * Used identically by local gameplay and online server.
+ * No weighting, no anti-streak, no pity logic.
+ */
+// Lazy-cached Node.js crypto module for high-performance rejection sampling
+let cachedNodeCrypto: { randomInt?: (min: number, max: number) => number } | null | undefined;
+function getNodeCrypto() {
+  if (cachedNodeCrypto === undefined) {
+    if (typeof process !== 'undefined' && process.versions?.node) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        cachedNodeCrypto = require('crypto');
+      } catch {
+        cachedNodeCrypto = null;
+      }
+    } else {
+      cachedNodeCrypto = null;
+    }
+  }
+  return cachedNodeCrypto;
+}
+
+export function rollFairDice(): number {
+  // If Node.js crypto.randomInt is available (server environment)
+  const nodeCrypto = getNodeCrypto();
+  if (nodeCrypto && typeof nodeCrypto.randomInt === 'function') {
+    // randomInt(min, max) returns uniform integer in [min, max) with rejection sampling
+    return nodeCrypto.randomInt(1, 7);
+  }
+
+  // Web Crypto API (Browser & modern JS environments)
+  if (typeof globalThis !== 'undefined' && globalThis.crypto?.getRandomValues) {
+    // 32-bit rejection sampling to avoid modulo bias (4294967296 is not divisible by 6)
+    // 4294967296 - (4294967296 % 6) = 4294967292
+    const limit = 4294967292;
+    const buf = new Uint32Array(1);
+    while (true) {
+      globalThis.crypto.getRandomValues(buf);
+      const val = buf[0];
+      if (val < limit) {
+        return (val % 6) + 1;
+      }
+    }
+  }
+
+  // Fallback if neither crypto is available
+  return Math.floor(Math.random() * 6) + 1;
+}
+
+/**
  * Rolls the dice for the active player.
- * Pure and deterministic; accepts an optional RNG function returning [0, 1).
+ * Uses unbiased cryptographic rejection sampling by default,
+ * or an injectable RNG function returning [0, 1) for tests.
  */
 export function rollDice(
   state: GameState,
-  rng: RNG = Math.random
+  rng?: RNG
 ): { state: GameState; roll: number; legalMoves: string[] } {
   if (
     (state.phase !== 'awaiting-roll' && state.phase !== 'need_roll') ||
@@ -256,8 +308,7 @@ export function rollDice(
     throw new Error(`Cannot roll dice during phase '${state.phase}'`);
   }
 
-  const rawRoll = Math.floor(rng() * 6) + 1;
-  const roll = Math.min(6, Math.max(1, rawRoll));
+  const roll = rng ? Math.min(6, Math.max(1, Math.floor(rng() * 6) + 1)) : rollFairDice();
 
   const activePlayer = state.players[state.activePlayerIndex];
   const controllablePlayer = getControllablePlayer(state, activePlayer);

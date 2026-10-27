@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { createGame, rollDice, applyMove } from '@/engine/engine';
 import { PlayerColor, getOppositeColor } from '@/engine/geometry';
@@ -525,12 +524,8 @@ export class MultiplayerService {
       throw new Error(`Cannot roll dice during phase: ${currentState.phase}`);
     }
 
-    // Cryptographically secure RNG
-    const cryptoRng = () => {
-      return crypto.randomInt(0, 1000000) / 1000000;
-    };
-
-    const rollResult = rollDice(currentState, cryptoRng);
+    // Pure server-authoritative fair dice with cryptographic rejection sampling
+    const rollResult = rollDice(currentState);
     const newState = rollResult.state;
     const roll = rollResult.roll;
     const legalMoves = rollResult.legalMoves;
