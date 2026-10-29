@@ -209,7 +209,7 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
     const timer = setTimeout(() => {
       autoMoveExecutingRef.current = false;
       handleSelectToken(singleMove);
-    }, 1150);
+    }, 900);
 
     return () => {
       clearTimeout(timer);

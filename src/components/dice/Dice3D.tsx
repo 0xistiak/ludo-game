@@ -46,6 +46,7 @@ export const Dice3D: React.FC<Dice3DProps> = ({
   const [persistedRoll, setPersistedRoll] = useState<number | null>(null);
   const isFirstMountRef = useRef(true);
   const lastHandledRollIdRef = useRef<string | number | null>(null);
+  const localInitiatedRef = useRef(false);
   const currentRollRef = useRef<number | null>(currentRoll);
   const lastRollRef = useRef<number | null>(lastRoll ?? currentRoll ?? null);
 
@@ -72,24 +73,24 @@ export const Dice3D: React.FC<Dice3DProps> = ({
     }
   }, [currentRoll, persistedRoll, isRolling, isAnimating]);
 
-  // Hard safety timeout: isRolling must NEVER remain true longer than 950ms under any circumstances
+  // Hard safety timeout: isRolling must NEVER remain true longer than 700ms under any circumstances
   useEffect(() => {
     if (isRolling) {
       const timer = setTimeout(() => {
         setIsRolling(false);
-      }, 950);
+      }, 700);
       return () => clearTimeout(timer);
     }
   }, [isRolling]);
 
-  // Run smooth 720ms decelerating random tumble sequence
+  // Run snappy 480ms decelerating random tumble sequence (single sound, single shuffle)
   const startTumble = useCallback((onComplete?: () => void) => {
     setIsRolling(true);
     setIsJustLanded(false);
     sound.playDiceRoll();
 
-    // 9 decelerating steps matching 720ms CSS tumble
-    const delays = [38, 42, 48, 56, 68, 84, 105, 130, 150];
+    // 6 snappy decelerating steps matching 480ms CSS tumble
+    const delays = [35, 45, 55, 70, 90, 115];
     let step = 0;
     let timer: NodeJS.Timeout | null = null;
 
@@ -106,12 +107,12 @@ export const Dice3D: React.FC<Dice3DProps> = ({
       if (step < delays.length) {
         timer = setTimeout(tick, delays[step]);
       } else {
-        // Tumble sequence complete (~720ms total)
+        // Tumble sequence complete (~480ms total)
         setIsRolling(false);
         const resolvedFace = currentRollRef.current ?? lastRollRef.current ?? 1;
         setPersistedRoll(resolvedFace);
         setIsJustLanded(true);
-        setTimeout(() => setIsJustLanded(false), 300);
+        setTimeout(() => setIsJustLanded(false), 200);
         onComplete?.();
       }
     };
@@ -136,10 +137,16 @@ export const Dice3D: React.FC<Dice3DProps> = ({
       return;
     }
 
-    // Record that we saw this rollId immediately so it is never re-processed
+    // If local user initiated this roll, mark it handled and DO NOT start a second tumble!
+    if (localInitiatedRef.current) {
+      localInitiatedRef.current = false;
+      lastHandledRollIdRef.current = rollId;
+      return;
+    }
+
     lastHandledRollIdRef.current = rollId;
 
-    // If it's my turn, handleRollClick triggered the roll animation already
+    // If it's my turn, we didn't initiate it and it's local, so don't re-tumble
     if (isMyTurn) {
       return;
     }
@@ -155,7 +162,7 @@ export const Dice3D: React.FC<Dice3DProps> = ({
       return;
     }
 
-    // Opponent's roll arrived: tumble asynchronously then display result
+    // Opponent's roll arrived: tumble asynchronously once then display result
     let cleanupFn: (() => void) | undefined;
     const startTimer = setTimeout(() => {
       cleanupFn = startTumble();
@@ -169,25 +176,25 @@ export const Dice3D: React.FC<Dice3DProps> = ({
   }, [rollId, isMyTurn, startTumble]);
 
   const handleRollClick = () => {
-    if (isRolling) {
-      setIsRolling(false);
+    // If already rolling or disabled or cannot roll: block click completely (prevents double rolls!)
+    if (isRolling || disabled || !canRoll) {
+      return;
     }
-    if (rollId) {
-      lastHandledRollIdRef.current = rollId;
-    }
+
+    localInitiatedRef.current = true;
 
     const prefersReducedMotion =
       typeof window !== 'undefined' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    if (prefersReducedMotion || !canRoll) {
+    if (prefersReducedMotion) {
       onRoll();
       return;
     }
 
-    // Call onRoll immediately so server request starts in parallel with animation
-    onRoll();
+    // Start single tumble and invoke onRoll
     startTumble();
+    onRoll();
   };
 
   // Keep showing the rolled number while token is animating or during persisted window
@@ -260,10 +267,12 @@ export const Dice3D: React.FC<Dice3DProps> = ({
         id="dice-roll-button"
         type="button"
         onClick={handleRollClick}
-        disabled={isRolling && !isMyTurn}
+        disabled={isRolling || disabled || !canRoll}
         aria-label="Roll Dice"
         className={`relative w-24 h-24 sm:w-28 sm:h-28 rounded-full flex items-center justify-center transition-all duration-200 select-none ${
-          canRoll && !disabled
+          isRolling
+            ? 'pointer-events-none cursor-default scale-100'
+            : canRoll && !disabled
             ? 'scale-100 hover:scale-105 active:scale-95 cursor-pointer'
             : isMyTurn
             ? 'scale-100 hover:scale-105 active:scale-95 cursor-pointer opacity-90'

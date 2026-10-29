@@ -162,7 +162,8 @@ class SoundManager {
 
   /**
    * 2. Dice Roll: bolder, richer rattle with band-pass filtered clicks,
-   * 2-3 wooden knocks, and a clear low thump on landing (~500ms).
+  /**
+   * 2. Dice Roll: a crisp, single, short (~220ms) procedural dice rattle and landing tap.
    */
   public playDiceRoll(): void {
     const dest = this.getDestinationNode();
@@ -172,16 +173,15 @@ class SoundManager {
       const now = this.ctx.currentTime;
       const ctx = this.ctx;
 
-      // Noise clicks slowing down across 500ms
-      const clickDelays = [0, 0.04, 0.09, 0.15, 0.22, 0.305, 0.40];
+      // 3 rapid micro noise clicks across 80ms
+      const clickDelays = [0, 0.035, 0.07];
       clickDelays.forEach((delay, idx) => {
         const clickTime = now + delay;
-        // Tiny noise burst
-        const bufferSize = Math.floor(ctx.sampleRate * 0.015);
+        const bufferSize = Math.floor(ctx.sampleRate * 0.01);
         const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
         const data = buffer.getChannelData(0);
         for (let i = 0; i < bufferSize; i++) {
-          data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.3));
+          data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.35));
         }
 
         const noise = ctx.createBufferSource();
@@ -189,63 +189,47 @@ class SoundManager {
 
         const bpf = ctx.createBiquadFilter();
         bpf.type = 'bandpass';
-        bpf.frequency.setValueAtTime(1400 + idx * 80, clickTime);
-        bpf.Q.setValueAtTime(3.2, clickTime);
+        bpf.frequency.setValueAtTime(1600 + idx * 120, clickTime);
+        bpf.Q.setValueAtTime(3.0, clickTime);
 
         const clickGain = ctx.createGain();
-        clickGain.gain.setValueAtTime(0.42, clickTime);
-        clickGain.gain.exponentialRampToValueAtTime(0.001, clickTime + 0.015);
+        clickGain.gain.setValueAtTime(0.35, clickTime);
+        clickGain.gain.exponentialRampToValueAtTime(0.001, clickTime + 0.012);
 
         noise.connect(bpf);
         bpf.connect(clickGain);
         clickGain.connect(dest);
 
         noise.start(clickTime);
-        noise.stop(clickTime + 0.018);
+        noise.stop(clickTime + 0.014);
       });
 
-      // 2-3 wooden resonant knocks
-      const knocks = [
-        { time: now + 0.12, freq: 280, dur: 0.045, gainVal: 0.35 },
-        { time: now + 0.27, freq: 240, dur: 0.05, gainVal: 0.4 },
-        { time: now + 0.41, freq: 200, dur: 0.055, gainVal: 0.45 },
-      ];
+      // 1 resonant wooden tumble knock at 95ms
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(260, now + 0.095);
+      osc.frequency.exponentialRampToValueAtTime(160, now + 0.145);
+      gain.gain.setValueAtTime(0.32, now + 0.095);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.145);
+      osc.connect(gain);
+      gain.connect(dest);
+      osc.start(now + 0.095);
+      osc.stop(now + 0.15);
 
-      knocks.forEach((k) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(k.freq, k.time);
-        osc.frequency.exponentialRampToValueAtTime(k.freq * 0.7, k.time + k.dur);
-
-        gain.gain.setValueAtTime(k.gainVal, k.time);
-        gain.gain.exponentialRampToValueAtTime(0.001, k.time + k.dur);
-
-        osc.connect(gain);
-        gain.connect(dest);
-
-        osc.start(k.time);
-        osc.stop(k.time + k.dur + 0.01);
-      });
-
-      // Ending low thump on landing (~500ms)
-      const thumpTime = now + 0.50;
+      // 1 firm low landing tap at 170ms
+      const thumpTime = now + 0.17;
       const thumpOsc = ctx.createOscillator();
       const thumpGain = ctx.createGain();
-
       thumpOsc.type = 'sine';
-      thumpOsc.frequency.setValueAtTime(120, thumpTime);
-      thumpOsc.frequency.exponentialRampToValueAtTime(45, thumpTime + 0.09);
-
-      thumpGain.gain.setValueAtTime(0.65, thumpTime);
-      thumpGain.gain.exponentialRampToValueAtTime(0.001, thumpTime + 0.1);
-
+      thumpOsc.frequency.setValueAtTime(135, thumpTime);
+      thumpOsc.frequency.exponentialRampToValueAtTime(45, thumpTime + 0.05);
+      thumpGain.gain.setValueAtTime(0.5, thumpTime);
+      thumpGain.gain.exponentialRampToValueAtTime(0.001, thumpTime + 0.06);
       thumpOsc.connect(thumpGain);
       thumpGain.connect(dest);
-
       thumpOsc.start(thumpTime);
-      thumpOsc.stop(thumpTime + 0.11);
+      thumpOsc.stop(thumpTime + 0.07);
     } catch {
       // Never throw
     }
