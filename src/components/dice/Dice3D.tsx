@@ -69,6 +69,16 @@ export const Dice3D: React.FC<Dice3DProps> = ({
     }
   }, [currentRoll, persistedRoll, isRolling]);
 
+  // Hard safety timeout: isRolling must NEVER remain true longer than 750ms under any circumstances
+  useEffect(() => {
+    if (isRolling) {
+      const timer = setTimeout(() => {
+        setIsRolling(false);
+      }, 750);
+      return () => clearTimeout(timer);
+    }
+  }, [isRolling]);
+
   // Run the smooth ~540ms decelerating random tumble sequence
   const startTumble = useCallback((onComplete?: () => void) => {
     setIsRolling(true);
@@ -93,7 +103,7 @@ export const Dice3D: React.FC<Dice3DProps> = ({
       } else {
         // Tumble sequence complete (~540ms total)
         setIsRolling(false);
-        const resolvedFace = currentRollRef.current ?? lastRollRef.current ?? tumblingFace;
+        const resolvedFace = currentRollRef.current ?? lastRollRef.current ?? 1;
         setPersistedRoll(resolvedFace);
         onComplete?.();
       }
@@ -103,8 +113,9 @@ export const Dice3D: React.FC<Dice3DProps> = ({
 
     return () => {
       if (timer) clearTimeout(timer);
+      setIsRolling(false);
     };
-  }, [tumblingFace]);
+  }, []);
 
   // Trigger roll animation for opponent rolls when roll arrives from server
   useEffect(() => {
@@ -118,13 +129,13 @@ export const Dice3D: React.FC<Dice3DProps> = ({
       return;
     }
 
+    // Record that we saw this rollId immediately so it is never re-processed
+    lastHandledRollIdRef.current = rollId;
+
     // If it's my turn, handleRollClick triggered the roll animation already
     if (isMyTurn) {
-      lastHandledRollIdRef.current = rollId;
       return;
     }
-
-    lastHandledRollIdRef.current = rollId;
 
     const prefersReducedMotion =
       typeof window !== 'undefined' &&
@@ -146,11 +157,17 @@ export const Dice3D: React.FC<Dice3DProps> = ({
     return () => {
       clearTimeout(startTimer);
       cleanupFn?.();
+      setIsRolling(false);
     };
   }, [rollId, isMyTurn, startTumble]);
 
   const handleRollClick = () => {
-    if (isRolling) return;
+    if (isRolling) {
+      setIsRolling(false);
+    }
+    if (rollId) {
+      lastHandledRollIdRef.current = rollId;
+    }
 
     const prefersReducedMotion =
       typeof window !== 'undefined' &&
@@ -233,11 +250,12 @@ export const Dice3D: React.FC<Dice3DProps> = ({
         id="dice-roll-button"
         type="button"
         onClick={handleRollClick}
-        disabled={isRolling}
+        disabled={isRolling && !isMyTurn}
+        aria-label="Roll Dice"
         className={`relative w-24 h-24 sm:w-28 sm:h-28 rounded-full flex items-center justify-center transition-all duration-200 select-none ${
-          canRoll && !disabled && !isRolling
+          canRoll && !disabled
             ? 'scale-100 hover:scale-105 active:scale-95 cursor-pointer'
-            : isMyTurn && !isRolling
+            : isMyTurn
             ? 'scale-100 hover:scale-105 active:scale-95 cursor-pointer opacity-90'
             : 'opacity-70 cursor-pointer'
         }`}
@@ -246,13 +264,13 @@ export const Dice3D: React.FC<Dice3DProps> = ({
           boxShadow:
             canRoll && !disabled
               ? `0 0 25px ${glowColor}, inset 0 0 15px ${glowColor}`
-              : isMyTurn && !isRolling
+              : isMyTurn
               ? `0 0 15px ${glowColor}`
               : '0 4px 15px rgba(0, 0, 0, 0.4)',
           border: `3px solid ${
             canRoll && !disabled
               ? glowColor
-              : isMyTurn && !isRolling
+              : isMyTurn
               ? glowColor
               : 'rgba(255, 255, 255, 0.1)'
           }`,

@@ -9,6 +9,7 @@ import {
   GameMode,
 } from '@/types/multiplayer';
 import { PlayerColor } from '@/engine/geometry';
+import { GameState } from '@/engine';
 import { isOnlineRoomValid } from '@/lib/session/gameSession';
 
 function getOrCreateSessionId(): string {
@@ -436,6 +437,41 @@ export function useMultiplayer() {
 
       const json = await res.json();
       if (!json.success) {
+        if (json.code === 'VERSION_CONFLICT') {
+          const currentRoomId = roomRef.current?.id;
+          if (currentRoomId) {
+            const freshRes = await fetch(`/api/room/get?id=${currentRoomId}&sessionId=${sessionId}`);
+            const freshJson = await freshRes.json();
+            if (freshJson.success && freshJson.data?.room) {
+              updateRoomData(freshJson.data);
+              const freshRoom = freshJson.data.room as RoomRow;
+              const freshState = freshRoom.state as GameState;
+              const active = freshState?.players?.[freshState.activePlayerIndex];
+              const meColor = freshJson.data.me?.color || me?.color;
+              if (
+                active &&
+                meColor &&
+                active.color.toLowerCase() === meColor.toLowerCase() &&
+                (freshState.phase === 'awaiting-roll' || freshState.phase === 'need_roll')
+              ) {
+                const retryRes = await fetch('/api/room/roll', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    roomId: freshRoom.id,
+                    sessionId,
+                    expectedVersion: freshRoom.version,
+                  }),
+                });
+                const retryJson = await retryRes.json();
+                if (retryJson.success && retryJson.data) {
+                  setRoom(retryJson.data.room);
+                  return retryJson.data;
+                }
+              }
+            }
+          }
+        }
         await fetchRoomState();
         throw new Error(json.error);
       }
@@ -448,7 +484,7 @@ export function useMultiplayer() {
       setError(msg);
       throw err;
     }
-  }, [room, sessionId, fetchRoomState]);
+  }, [room, sessionId, fetchRoomState, me, updateRoomData]);
 
   // Server-authoritative Move
   const makeMoveServer = useCallback(
@@ -469,6 +505,42 @@ export function useMultiplayer() {
 
         const json = await res.json();
         if (!json.success) {
+          if (json.code === 'VERSION_CONFLICT') {
+            const currentRoomId = roomRef.current?.id;
+            if (currentRoomId) {
+              const freshRes = await fetch(`/api/room/get?id=${currentRoomId}&sessionId=${sessionId}`);
+              const freshJson = await freshRes.json();
+              if (freshJson.success && freshJson.data?.room) {
+                updateRoomData(freshJson.data);
+                const freshRoom = freshJson.data.room as RoomRow;
+                const freshState = freshRoom.state as GameState;
+                const active = freshState?.players?.[freshState.activePlayerIndex];
+                const meColor = freshJson.data.me?.color || me?.color;
+                if (
+                  active &&
+                  meColor &&
+                  active.color.toLowerCase() === meColor.toLowerCase() &&
+                  (freshState.phase === 'awaiting-move' || freshState.phase === 'need_move')
+                ) {
+                  const retryRes = await fetch('/api/room/move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      roomId: freshRoom.id,
+                      sessionId,
+                      tokenId,
+                      expectedVersion: freshRoom.version,
+                    }),
+                  });
+                  const retryJson = await retryRes.json();
+                  if (retryJson.success && retryJson.data) {
+                    setRoom(retryJson.data.room);
+                    return retryJson.data;
+                  }
+                }
+              }
+            }
+          }
           await fetchRoomState();
           throw new Error(json.error);
         }
@@ -482,7 +554,7 @@ export function useMultiplayer() {
         throw err;
       }
     },
-    [room, sessionId, fetchRoomState]
+    [room, sessionId, fetchRoomState, me, updateRoomData]
   );
 
   // Determine if current user is the host

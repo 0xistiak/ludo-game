@@ -239,16 +239,21 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
         const rollVal = gameState.lastDiceRoll;
         const startTimer = setTimeout(() => {
           showToast(`No move (rolled ${rollVal})`, 1600);
-          setIsNoMovePause(true);
-          setNoMoveRoll(rollVal);
+          if (!isMyTurn) {
+            setIsNoMovePause(true);
+            setNoMoveRoll(rollVal);
+          }
         }, 0);
-        const timer = setTimeout(() => {
-          setIsNoMovePause(false);
-          setNoMoveRoll(null);
-        }, 1600);
+        let resetTimer: NodeJS.Timeout | null = null;
+        if (!isMyTurn) {
+          resetTimer = setTimeout(() => {
+            setIsNoMovePause(false);
+            setNoMoveRoll(null);
+          }, 1600);
+        }
         return () => {
           clearTimeout(startTimer);
-          clearTimeout(timer);
+          if (resetTimer) clearTimeout(resetTimer);
           setIsNoMovePause(false);
           setNoMoveRoll(null);
         };
@@ -256,7 +261,7 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
     } else {
       lastProcessedRollSeqRef.current = currentSeq;
     }
-  }, [isOnline, gameState.rollSeq, gameState.phase, gameState.lastDiceRoll, gameState.revertedTurn]);
+  }, [isOnline, isMyTurn, gameState.rollSeq, gameState.phase, gameState.lastDiceRoll, gameState.revertedTurn]);
 
   // Handle dice roll or dice tap during move phase
   const handleRoll = () => {
@@ -264,7 +269,8 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
       setIsAnimating(false);
     }
     if (isNoMovePause) {
-      return;
+      setIsNoMovePause(false);
+      setNoMoveRoll(null);
     }
 
     if (!isMyTurn) {
@@ -560,8 +566,8 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
         <Dice3D
           currentRoll={activeRoll}
           lastRoll={gameState.lastDiceRoll}
-          canRoll={isPhaseRoll && isMyTurn && !isAnimating && !isNoMovePause}
-          disabled={!isPhaseRoll || !isMyTurn || isAnimating || isNoMovePause}
+          canRoll={isPhaseRoll && isMyTurn && !isAnimating}
+          disabled={!isPhaseRoll || !isMyTurn || isAnimating}
           activeColor={activePlayer.color}
           onRoll={handleRoll}
           bonusReason={bonusReason}

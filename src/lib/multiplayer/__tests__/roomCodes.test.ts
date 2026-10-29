@@ -7,24 +7,20 @@ describe('Room Code Generation & Sanitization', () => {
     expect(code).toHaveLength(6);
   });
 
-  it('generates uppercase alphanumeric codes excluding ambiguous characters (0, O, 1, I)', () => {
+  it('generates 6-digit numeric codes with digits from 1 to 6', () => {
     for (let i = 0; i < 50; i++) {
       const code = generateRoomCode();
-      expect(code).toMatch(/^[A-HJ-NP-Z2-9]{6}$/);
-      expect(code).not.toContain('0');
-      expect(code).not.toContain('O');
-      expect(code).not.toContain('1');
-      expect(code).not.toContain('I');
+      expect(code).toMatch(/^[1-6]{6}$/);
     }
   });
 
-  it('generates unique codes across calls', () => {
+  it('generates high entropy codes across calls', () => {
     const set = new Set<string>();
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < 50; i++) {
       set.add(generateRoomCode());
     }
-    // High entropy 32^6 ~ 1 billion permutations, 100 random codes should be distinct
-    expect(set.size).toBe(100);
+    // Out of 50 samples from 46,656 permutations, at least 45 unique codes
+    expect(set.size).toBeGreaterThanOrEqual(45);
   });
 
   it('sanitizes input codes properly', () => {

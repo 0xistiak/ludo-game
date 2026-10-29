@@ -29,7 +29,7 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
     e.preventDefault();
     const sanitized = roomCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (sanitized.length !== 6) {
-      setError('Please enter a valid 6-character room code');
+      setError('Please enter a valid 6-digit room code');
       return;
     }
     if (!playerName.trim()) {
@@ -86,16 +86,17 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
             {/* Room Code */}
             <div>
               <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5 block">
-                6-Character Room Code
+                6-Digit Room Code
               </label>
               <input
                 id="join-room-code-input"
                 type="text"
+                inputMode="numeric"
                 value={roomCode}
                 maxLength={6}
                 onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
                 className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-xl font-mono font-black text-amber-400 tracking-widest text-center focus:outline-none focus:border-amber-400 uppercase placeholder:text-slate-600 placeholder:text-sm placeholder:font-sans placeholder:tracking-normal"
-                placeholder="e.g. 7K2M9X"
+                placeholder="e.g. 426153"
                 required
                 autoFocus
               />

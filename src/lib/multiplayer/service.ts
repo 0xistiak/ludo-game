@@ -141,7 +141,7 @@ export class MultiplayerService {
       .maybeSingle();
 
     if (roomError || !room) {
-      throw new Error('Room not found. Please check the 6-character code.');
+      throw new Error('Room not found. Please check the 6-digit code.');
     }
 
     const maxPlayers = room.mode === '1v1' ? 2 : 4;

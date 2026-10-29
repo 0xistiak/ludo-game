@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 
-// 32 characters: uppercase alphanumeric excluding ambiguous chars (0, O, 1, I)
-const CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+// 6 digits: digits from 1 to 6
+const CHARSET = '123456';
 
 export function generateRoomCode(length: number = 6): string {
   const bytes = crypto.randomBytes(length);
