@@ -25,6 +25,7 @@ interface Dice3DProps {
   bonusReason?: 'six' | 'capture' | 'home' | null;
   rollId?: string | number | null;
   isMyTurn?: boolean;
+  isAnimating?: boolean;
 }
 
 export const Dice3D: React.FC<Dice3DProps> = ({
@@ -37,8 +38,10 @@ export const Dice3D: React.FC<Dice3DProps> = ({
   bonusReason,
   rollId,
   isMyTurn = true,
+  isAnimating = false,
 }) => {
   const [isRolling, setIsRolling] = useState(false);
+  const [isJustLanded, setIsJustLanded] = useState(false);
   const [tumblingFace, setTumblingFace] = useState<number>(1);
   const [persistedRoll, setPersistedRoll] = useState<number | null>(null);
   const isFirstMountRef = useRef(true);
@@ -59,32 +62,34 @@ export const Dice3D: React.FC<Dice3DProps> = ({
     }
   }, [lastRoll]);
 
-  // Keep displayed face visible for ~1400ms after currentRoll goes null so opponent and roller can read the number
+  // Keep displayed face visible while token is animating or for ~2200ms so players have plenty of time to watch the rolled face
   useEffect(() => {
-    if (currentRoll === null && persistedRoll !== null && !isRolling) {
+    if (currentRoll === null && persistedRoll !== null && !isRolling && !isAnimating) {
       const timer = setTimeout(() => {
         setPersistedRoll(null);
-      }, 1400);
+      }, 2200);
       return () => clearTimeout(timer);
     }
-  }, [currentRoll, persistedRoll, isRolling]);
+  }, [currentRoll, persistedRoll, isRolling, isAnimating]);
 
-  // Hard safety timeout: isRolling must NEVER remain true longer than 750ms under any circumstances
+  // Hard safety timeout: isRolling must NEVER remain true longer than 950ms under any circumstances
   useEffect(() => {
     if (isRolling) {
       const timer = setTimeout(() => {
         setIsRolling(false);
-      }, 750);
+      }, 950);
       return () => clearTimeout(timer);
     }
   }, [isRolling]);
 
-  // Run the smooth ~540ms decelerating random tumble sequence
+  // Run smooth 720ms decelerating random tumble sequence
   const startTumble = useCallback((onComplete?: () => void) => {
     setIsRolling(true);
+    setIsJustLanded(false);
     sound.playDiceRoll();
 
-    const delays = [35, 40, 45, 55, 70, 85, 100, 110];
+    // 9 decelerating steps matching 720ms CSS tumble
+    const delays = [38, 42, 48, 56, 68, 84, 105, 130, 150];
     let step = 0;
     let timer: NodeJS.Timeout | null = null;
 
@@ -101,10 +106,12 @@ export const Dice3D: React.FC<Dice3DProps> = ({
       if (step < delays.length) {
         timer = setTimeout(tick, delays[step]);
       } else {
-        // Tumble sequence complete (~540ms total)
+        // Tumble sequence complete (~720ms total)
         setIsRolling(false);
         const resolvedFace = currentRollRef.current ?? lastRollRef.current ?? 1;
         setPersistedRoll(resolvedFace);
+        setIsJustLanded(true);
+        setTimeout(() => setIsJustLanded(false), 300);
         onComplete?.();
       }
     };
@@ -183,7 +190,10 @@ export const Dice3D: React.FC<Dice3DProps> = ({
     startTumble();
   };
 
-  const activeFace = isRolling ? tumblingFace : (currentRoll ?? persistedRoll);
+  // Keep showing the rolled number while token is animating or during persisted window
+  const activeFace = isRolling
+    ? tumblingFace
+    : (currentRoll ?? persistedRoll ?? (isAnimating ? (lastRoll ?? null) : null));
 
   const ringGlows: Record<PlayerColor, string> = {
     red: 'rgba(239, 68, 68, 0.65)',
@@ -279,7 +289,9 @@ export const Dice3D: React.FC<Dice3DProps> = ({
         {/* 3D Dice SVG with pure clean 600ms tumble animation */}
         <div
           id="dice-cube"
-          className={`w-14 h-14 sm:w-16 sm:h-16 relative flex items-center justify-center ${isRolling ? 'dice-tumbling' : ''}`}
+          className={`w-14 h-14 sm:w-16 sm:h-16 relative flex items-center justify-center ${
+            isRolling ? 'dice-tumbling' : isJustLanded ? 'dice-land-pop' : ''
+          }`}
           style={{
             transform: 'none',
             transition: 'none',

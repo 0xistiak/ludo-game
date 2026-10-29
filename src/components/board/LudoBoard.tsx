@@ -49,11 +49,19 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
 }) => {
   const { tokens, legalMoves, lastMove, turnCount } = gameState;
 
-  // Animation state
-  const [animatingStep, setAnimatingStep] = useState<{
+  // Animation state: moving token visual in flight (60/120fps continuous rAF)
+  const [movingToken, setMovingToken] = useState<{
     tokenId: string;
-    step: number;
-    isHopping: boolean;
+    color: PlayerColor;
+    tokenIndex: number;
+    x: number;
+    y: number;
+    scale: number;
+    shadowX: number;
+    shadowY: number;
+    shadowRx: number;
+    shadowRy: number;
+    shadowOpacity: number;
   } | null>(null);
 
   const [highlightCells, setHighlightCells] = useState<{
@@ -68,8 +76,8 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
   } | null>(null);
 
   // Track last handled move to avoid replaying on initial load/refresh
-  const lastHandledMoveKeyRef = useRef<string | null>(null);
-  const isFirstMountRef = useRef<boolean>(true);
+  const currentMoveKey = lastMove ? `${turnCount}_${lastMove.tokenId}_${lastMove.from}_${lastMove.to}` : null;
+  const [handledMoveKey, setHandledMoveKey] = useState<string | null>(currentMoveKey);
 
   // Active base exit eligibility
   const activeColor = gameState.currentPlayer || gameState.players[gameState.activePlayerIndex]?.color;
@@ -80,23 +88,13 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
     });
   }, [legalMoves, tokens, activeColor]);
 
-  // Handle lastMove step-by-step animation
+  // Handle lastMove with smooth continuous 60fps hop-arc movement
   useEffect(() => {
-    if (!lastMove) return;
+    if (!lastMove || !currentMoveKey) return;
 
-    const moveKey = `${turnCount}_${lastMove.tokenId}_${lastMove.from}_${lastMove.to}`;
-
-    // On initial mount or page refresh: avoid replaying past animations
-    if (isFirstMountRef.current) {
-      isFirstMountRef.current = false;
-      lastHandledMoveKeyRef.current = moveKey;
+    if (handledMoveKey === currentMoveKey) {
       return;
     }
-
-    if (lastHandledMoveKeyRef.current === moveKey) {
-      return;
-    }
-    lastHandledMoveKeyRef.current = moveKey;
 
     const token = tokens[lastMove.tokenId];
     if (!token) return;
@@ -117,36 +115,59 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
       setHighlightCells(null);
     }, 1200);
 
-    if (prefersReducedMotion || !lastMove.path || lastMove.path.length <= 1) {
-      // Instant transition
+    if (prefersReducedMotion) {
+      queueMicrotask(() => {
+        setHandledMoveKey(currentMoveKey);
+      });
       return () => clearTimeout(highlightTimer);
     }
 
-    // Step-by-step hop along path
+    // Build waypoints array along path
+    let waypoints: Coord[] = [];
+    if (lastMove.path && lastMove.path.length > 1) {
+      waypoints = lastMove.path.map((step) =>
+        getTokenCoord(token.color, step, token.index)
+      );
+    } else {
+      waypoints = [fromCoord, toCoord];
+    }
+
+    const hopCount = waypoints.length - 1;
+    if (hopCount <= 0) {
+      queueMicrotask(() => {
+        setHandledMoveKey(currentMoveKey);
+      });
+      return () => clearTimeout(highlightTimer);
+    }
+
     onAnimationStateChange?.(true);
 
-    if (lastMove.from === STEP_BASE) {
+    const isBaseExit = lastMove.from === STEP_BASE;
+    if (isBaseExit) {
       sound.playBaseExit();
     }
 
-    const path = lastMove.path;
-    const stepDuration = Math.min(140, Math.max(80, Math.floor(1000 / Math.max(1, path.length))));
-    let currentIdx = 0;
+    // Dynamic duration: snappy hops (~110ms-130ms per step, ~280ms for base exit)
+    const stepDuration = isBaseExit ? 280 : Math.max(105, Math.min(140, Math.floor(750 / hopCount)));
+    const totalDuration = hopCount * stepDuration;
 
-    const stepInterval = setInterval(() => {
-      currentIdx++;
-      if (currentIdx < path.length) {
-        sound.playTokenStep(currentIdx);
-        setAnimatingStep({
-          tokenId: lastMove.tokenId,
-          step: path[currentIdx],
-          isHopping: true,
-        });
-      } else {
-        clearInterval(stepInterval);
-        setAnimatingStep(null);
+    let rafId: number | null = null;
+    let startTime: number | null = null;
+    let lastPlayedHop = -1;
 
-        // Capture flash effect
+    const animateFrame = (now: number) => {
+      if (startTime === null) {
+        startTime = now;
+      }
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / totalDuration);
+
+      if (progress >= 1) {
+        // Animation finished at destination
+        setMovingToken(null);
+        setHandledMoveKey(currentMoveKey);
+
+        // Sound & celebratory effects at landing
         if (lastMove.capturedTokenIds && lastMove.capturedTokenIds.length > 0) {
           sound.playCapture();
           setCapturedFlash({
@@ -156,36 +177,90 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
           setTimeout(() => {
             setCapturedFlash(null);
             onAnimationStateChange?.(false);
-          }, 200);
+          }, 240);
         } else if (lastMove.reachedHome) {
           sound.playHomeFinish();
           setSparkleCoord(toCoord);
           setTimeout(() => {
             setSparkleCoord(null);
             onAnimationStateChange?.(false);
-          }, 300);
+          }, 350);
         } else {
           onAnimationStateChange?.(false);
         }
+        return;
       }
-    }, stepDuration);
 
-    // Safety timeout: animation must NEVER block longer than 1.5s
+      // Determine current hop segment [k, k+1]
+      const totalProg = progress * hopCount;
+      const k = Math.min(hopCount - 1, Math.floor(totalProg));
+      const segT = totalProg - k; // 0..1 within this hop
+
+      // Play step sound on entry to each hop segment (except base exit which already played)
+      if (k > lastPlayedHop && !isBaseExit) {
+        lastPlayedHop = k;
+        sound.playTokenStep(k + 1);
+      }
+
+      const p0 = waypoints[k];
+      const p1 = waypoints[k + 1];
+
+      // Smooth horizontal easing: cosine ease-in-out
+      const ease = 0.5 - 0.5 * Math.cos(Math.PI * segT);
+      const groundX = p0.x + (p1.x - p0.x) * ease;
+      const groundY = p0.y + (p1.y - p0.y) * ease;
+
+      // Parabolic vertical hop arc (sine curve)
+      const arcHeight = isBaseExit ? 26 : 16;
+      const arcFactor = Math.sin(Math.PI * segT);
+      const liftY = -arcHeight * arcFactor;
+      const currentY = groundY + liftY;
+
+      // 3D scale expansion at apex
+      const scale = 1.0 + (isBaseExit ? 0.28 : 0.22) * arcFactor;
+
+      // Dynamic ground shadow that diffuses and shrinks as token rises
+      const shadowRx = 13 - 4 * arcFactor;
+      const shadowRy = 6 - 2 * arcFactor;
+      const shadowOpacity = 0.40 - 0.22 * arcFactor;
+
+      setMovingToken({
+        tokenId: lastMove.tokenId,
+        color: token.color,
+        tokenIndex: token.index,
+        x: groundX,
+        y: currentY,
+        scale,
+        shadowX: groundX,
+        shadowY: groundY + 5,
+        shadowRx,
+        shadowRy,
+        shadowOpacity,
+      });
+
+      rafId = requestAnimationFrame(animateFrame);
+    };
+
+    rafId = requestAnimationFrame(animateFrame);
+
+    // Safety timeout: animation must NEVER block longer than 1.6s
     const safetyTimeout = setTimeout(() => {
-      clearInterval(stepInterval);
-      setAnimatingStep(null);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      setMovingToken(null);
+      setHandledMoveKey(currentMoveKey);
       setCapturedFlash(null);
       setSparkleCoord(null);
       onAnimationStateChange?.(false);
-    }, 1500);
+    }, 1600);
 
     return () => {
-      clearInterval(stepInterval);
+      if (rafId !== null) cancelAnimationFrame(rafId);
       clearTimeout(highlightTimer);
       clearTimeout(safetyTimeout);
+      setMovingToken(null);
       onAnimationStateChange?.(false);
     };
-  }, [lastMove, turnCount, tokens, onAnimationStateChange]);
+  }, [lastMove, turnCount, tokens, onAnimationStateChange, currentMoveKey, handledMoveKey]);
 
   // Handle 3 consecutive 6s turn cancellation and token slide-back
   const [revertingActive, setRevertingActive] = useState<boolean>(false);
@@ -226,15 +301,23 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
     const map = new Map<string, { coord: Coord; isLegal: boolean; color: PlayerColor }>();
     const posCounts = new Map<string, number>();
 
-    // First pass: compute coords (using animatingStep if active)
+    // First pass: compute coords (omitting the actively moving token)
     for (const [id, token] of Object.entries(tokens)) {
+      // If this token is currently in flight via movingToken, omit from static map
+      if (movingToken && movingToken.tokenId === id) {
+        continue;
+      }
+
       let stepToRender = token.step;
-      if (animatingStep && animatingStep.tokenId === id) {
-        stepToRender = animatingStep.step;
+      // If a move just arrived but animation hasn't started yet, don't flash at destination
+      if (lastMove && lastMove.tokenId === id && currentMoveKey && handledMoveKey !== currentMoveKey) {
+        stepToRender = lastMove.from;
       }
 
       const coord = getTokenCoord(token.color, stepToRender, token.index);
-      const isLegal = legalMoves.includes(id) || (Boolean(legalBaseTokenId) && token.color === activeColor && token.step === STEP_BASE);
+      const isLegal =
+        legalMoves.includes(id) ||
+        (Boolean(legalBaseTokenId) && token.color === activeColor && token.step === STEP_BASE);
       map.set(id, { coord, isLegal, color: token.color });
 
       const key = `${Math.round(coord.x)},${Math.round(coord.y)}`;
@@ -243,37 +326,32 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
 
     // Second pass: apply slight offset if more than 1 token on exact same spot
     const posCurrentIndex = new Map<string, number>();
-    const finalMap = new Map<string, { coord: Coord; isLegal: boolean; color: PlayerColor; isHopping?: boolean }>();
+    const finalMap = new Map<string, { coord: Coord; isLegal: boolean; color: PlayerColor }>();
 
     for (const [id, entry] of map.entries()) {
-      const isThisTokenAnimating = animatingStep?.tokenId === id;
       const key = `${Math.round(entry.coord.x)},${Math.round(entry.coord.y)}`;
       const total = posCounts.get(key) || 1;
       const index = posCurrentIndex.get(key) || 0;
       posCurrentIndex.set(key, index + 1);
 
-      if (total > 1 && !isThisTokenAnimating) {
+      if (total > 1) {
         // Offset in a small cluster circle
         const angle = (index / total) * Math.PI * 2;
         const radius = Math.min(10, 4 + total * 2);
         finalMap.set(id, {
           ...entry,
-          isHopping: isThisTokenAnimating,
           coord: {
             x: entry.coord.x + Math.cos(angle) * radius,
             y: entry.coord.y + Math.sin(angle) * radius,
           },
         });
       } else {
-        finalMap.set(id, {
-          ...entry,
-          isHopping: isThisTokenAnimating,
-        });
+        finalMap.set(id, entry);
       }
     }
 
     return finalMap;
-  }, [tokens, legalMoves, legalBaseTokenId, activeColor, animatingStep]);
+  }, [tokens, legalMoves, legalBaseTokenId, activeColor, movingToken, lastMove, handledMoveKey, currentMoveKey]);
 
   // Handle click on base yard directly
   const handleBaseYardClick = (color: PlayerColor) => {
@@ -664,21 +742,17 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
           </g>
         )}
 
-        {/* 8. Render Tokens on top with smooth step-by-step hops */}
+        {/* 8. Render Static Tokens with smooth settle and revert transitions */}
         <g id="tokens-layer">
           {Array.from(tokenCoords.entries()).map(([id, item]) => {
-            const isHopping = item.isHopping;
             return (
               <g
                 key={id}
-                transform={`translate(${item.coord.x}, ${item.coord.y}) ${isHopping ? 'scale(1.25)' : 'scale(1)'}`}
+                transform={`translate(${item.coord.x}, ${item.coord.y})`}
                 style={{
                   transition: revertingActive
-                    ? 'transform 0.6s ease-out'
-                    : isHopping
-                    ? 'transform 0.1s ease-out'
+                    ? 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)'
                     : 'transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                  filter: isHopping ? 'url(#hop-shadow)' : undefined,
                 }}
               >
                 <TokenSvg
@@ -698,6 +772,34 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
             );
           })}
         </g>
+
+        {/* 9. Active Moving Token Layer (rendered on top with dynamic shadow & continuous hop arc) */}
+        {movingToken && (
+          <g id="active-moving-token" className="pointer-events-none">
+            {/* Dynamic Ground Shadow */}
+            <ellipse
+              cx={movingToken.shadowX}
+              cy={movingToken.shadowY}
+              rx={movingToken.shadowRx}
+              ry={movingToken.shadowRy}
+              fill="#000000"
+              opacity={movingToken.shadowOpacity}
+            />
+            {/* Lifted Animated Token */}
+            <g
+              transform={`translate(${movingToken.x}, ${movingToken.y}) scale(${movingToken.scale})`}
+              style={{
+                filter: 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.45))',
+              }}
+            >
+              <TokenSvg
+                id={`moving-${movingToken.tokenId}`}
+                color={movingToken.color}
+                isLegal={false}
+              />
+            </g>
+          </g>
+        )}
       </svg>
     </div>
   );

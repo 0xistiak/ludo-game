@@ -101,19 +101,22 @@ html, body {
   cursor: pointer;
 }
 
-/* Smooth dice tumble animation: exactly 600ms, decelerates smoothly and ends flat and upright */
+/* Smooth, physics-inspired dice tumble: 720ms, decelerates naturally and lands upright */
 @keyframes dice-tumble {
   0% {
-    transform: rotate(0deg) scale(0.92);
+    transform: rotate(0deg) scale(0.90);
   }
-  30% {
-    transform: rotate(360deg) scale(0.88);
+  20% {
+    transform: rotate(270deg) scale(0.85);
   }
-  65% {
-    transform: rotate(720deg) scale(0.96);
+  50% {
+    transform: rotate(630deg) scale(0.92);
   }
-  85% {
-    transform: rotate(980deg) scale(1.02);
+  75% {
+    transform: rotate(900deg) scale(1.04);
+  }
+  90% {
+    transform: rotate(1040deg) scale(1.02);
   }
   100% {
     transform: rotate(1080deg) scale(1);
@@ -121,7 +124,24 @@ html, body {
 }
 
 .dice-tumbling {
-  animation: dice-tumble 600ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  animation: dice-tumble 720ms cubic-bezier(0.15, 0.85, 0.25, 1) forwards;
+}
+
+/* Crisp landing pop when final rolled number is revealed */
+@keyframes dice-land-pop {
+  0% {
+    transform: scale(0.90);
+  }
+  45% {
+    transform: scale(1.10);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.dice-land-pop {
+  animation: dice-land-pop 280ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
 /* Respect reduced motion */

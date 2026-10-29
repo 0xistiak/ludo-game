@@ -209,7 +209,7 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
     const timer = setTimeout(() => {
       autoMoveExecutingRef.current = false;
       handleSelectToken(singleMove);
-    }, 750);
+    }, 1150);
 
     return () => {
       clearTimeout(timer);
@@ -573,6 +573,7 @@ export const GameplayScreen: React.FC<GameplayScreenProps> = ({
           bonusReason={bonusReason}
           rollId={`${gameState.rollSeq ?? 0}_${gameState.turnCount}_${gameState.lastDiceRoll ?? activeRoll ?? 'none'}_${isOnline ? (roomCode || 'online') : 'local'}`}
           isMyTurn={isMyTurn}
+          isAnimating={isAnimating}
         />
 
         {/* Rules quick preview button */}
